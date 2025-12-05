@@ -6,66 +6,11 @@ const c = @import("c.zig").c;
 const constants = @import("constants.zig");
 const log = @import("log.zig");
 
+const Client = @import("Client.zig");
+const Monitor = @import("Monitor.zig");
+
 const Generic = error.Generic;
 
-const Client = struct {
-	kind: ClientType,
-	mon: *Monitor,
-	scene: *c.struct_wlr_scene_tree,
-	border: [4]*c.struct_wlr_scene_rect, // top, bottom, left, right
-	scene_surface: *c.struct_wlr_scene_tree,
-	link: c.struct_wl_list,
-	flink: c.struct_wl_list,
-	geom: c.struct_wlr_box,
-	prev: c.struct_wlr_box,
-	bounds: c.struct_wlr_box,
-	surface: union {
-		xdg: *c.wlr_xdg_surface,
-		xwayland: *c.struct_wlr_xwayland_surface
-	},
-	decoration: *c.struct_wlr_xdg_toplevel_decoration_v1,
-	commit: c.struct_wl_listener,
-	map: c.struct_wl_listener,
-	maximize: c.struct_wl_listener,
-	unmap: c.struct_wl_listener,
-	destroy: c.struct_wl_listener,
-	set_title: c.struct_wl_listener,
-	fullscreen: c.struct_wl_listener,
-	set_decoration_mode: c.struct_wl_listener,
-	destroy_decoration: c.struct_wl_listener,
-
-	bw: u32,
-	tags: u32,
-	// TODO CONSIDER bit field
-	is_floating: bool,
-	is_urgent: bool,
-	is_fullscreen: bool,
-	resize: u32,
-
-	xwayland: if (config.xwayland) struct {
-		activate: c.struct_wlr_listener,
-		associate: c.struct_wlr_listener,
-		dissociate: c.struct_wlr_listener,
-		configure: c.struct_wlr_listener,
-		set_hints: c.struct_wlr_listener,
-	} else void,
-
-	fn get_surface(self: *const Client) ?c.struct_wlr_surface {
-		if (config.xwayland and self.kind == .x11)
-			return self.surface.xwayland.surface;
-		return self.surface.xdg.surface;
-	}
-
-	fn set_border_color(self: *const Client, hex: comptime_int) void {
-		const col = color(hex);
-		for (0..4) |i| c.wlr_scene_rect_set_color(self.border[i], col);
-	}
-
-	fn visible_on(self: *const Client, mon: ?*const Monitor) bool {
-		return mon != null and self.mon == mon and
-			@intFromBool(self.tags & mon.?.tagset[mon.?.seltags]);
-	}
-};
 const LayerSurface = struct {
 	// NOTE must keep this field first
 	kind: c_uint,
@@ -82,42 +27,6 @@ const Layout = struct {
 	symbol: []const u8,
 	arrange: *const fn (*Monitor) void
 };
-const Monitor = struct {
-	link: c.wl_list,
-	output: *c.wlr_output,
-	scene_output: *c.wlr_scene_output,
-	fullscreen_bg: *c.wlr_scene_rect,
-	frame: c.wl_listener,
-	destroy: c.wl_listener,
-	request_state: c.wl_listener,
-	destroy_lock_surface: c.wl_listener,
-	lock_surface: *c.wlr_session_lock_surface_v1,
-	monitor: c.wlr_box,
-	window: c.wlr_box,
-	layers: c.wl_list[4],
-	layout: [2]*Layout,
-	seltags: u32,
-	sellt: u32,
-	tagset: [2]u32,
-	mfact: f32,
-	gamma_lut_changed: i32,
-	nmaster: i32,
-	ltsymbol: [16]u8,
-	asleep: i32,
-
-	fn topmost_client(self: *Monitor) ?*Client {
-		var cl: *Client = undefined;
-		cl = c.wl_container_of(fstack.next, cl, "flink");
-		while (&cl.flink != &fstack) : (cl = c.wl_container_of(cl.flink.next, cl, "flink"))
-			if (cl.visible_on(self)) return cl;
-		return null;
-	}
-
-// TODO for (c = wl_container_of((fstack)->next, c, flink);    \
-// TODO      &c->flink != (fstack);                    \
-// TODO      c = wl_container_of(c->flink.next, c, flink))
-// TODO }
-};
 
 const Layer = enum(u8) {
 	background,
@@ -131,10 +40,9 @@ const Layer = enum(u8) {
 };
 const NUM_LAYERS = @typeInfo(Layer).@"enum".fields.len;
 
-const ClientType = enum(i8) {invalid, xdg_shell, layer_shell, x11};
-
 const gpu_reset = c.struct_wl_listener{ .notify = cb_gpu_reset };
 const request_activate = c.struct_wl_listener{ .notify = cb_urgent };
+const output_power_mgr_set_mode = c.struct_wl_listener{ .notify = cb_power_mgr_set_mode };
 
 var activation: *c.wlr_xdg_activation_v1 = undefined;
 var alloc: *c.struct_wlr_allocator = undefined;
@@ -152,6 +60,8 @@ var scene: *c.struct_wlr_scene = undefined;
 var session: *c.struct_wlr_session = undefined;
 
 var fstack: c.struct_wl_list = undefined;
+
+var power_mgr: *c.struct_wlr_output_power_manager_v1 = undefined;
 
 pub fn init() !void {
 	// Reset signal handlers for SIGCHLD, SIGINT, SIGTERM and SIGPIPE
@@ -173,16 +83,12 @@ pub fn init() !void {
 
 	display = c.wl_display_create() orelse return Generic;
 	event_loop = c.wl_display_get_event_loop(display) orelse return Generic;
-	
 	backend = c.wlr_backend_autocreate(event_loop, @ptrCast(&session)) orelse {
 		log.errln("wlroots: Failed to create backend!", .{});
 		return Generic;
 	};
-
 	scene = c.wlr_scene_create();
-
-	const bg: [4]f32 = color(constants.config.rootcolor);
-	root_bg = c.wlr_scene_rect_create(&scene.tree, 0, 0, &bg);
+	root_bg = c.wlr_scene_rect_create(&scene.tree, 0, 0, constants.config.rootcolor);
 
 	for (&layers) |*layer| layer.* = c.wlr_scene_tree_create(&scene.tree);
 	drag_icon = c.wlr_scene_tree_create(&scene.tree);
@@ -229,6 +135,16 @@ pub fn init() !void {
 
 	activation = c.wlr_xdg_activation_v1_create(display);
 	c.wl_signal_add(&activation.events.request_activate, &request_activate);
+
+	c.wlr_scene_set_gamma_control_manager_v1(
+		scene,
+		c.wlr_gamma_control_manager_v1_create(display)
+	);
+
+	power_mgr = c.wlr_output_power_manager_v1_create(display);
+	c.wl_signal_add(&power_mgr.events.set_mode, &output_power_mgr_set_node);
+
+	// TODO NOW
 }
 
 fn handlesig(signo: i32) callconv(.c) void {
@@ -239,18 +155,7 @@ fn handlesig(signo: i32) callconv(.c) void {
 		c.wl_display_terminate(display);
 }
 
-// TODO CONSIDER REMOVE
-fn color(hex: comptime_int) [4]f32 {
-	std.debug.assert(hex >= 0 and hex < 0xff_ff_ff_ff);
-	return .{
-		(hex >> 24) & 0xff / 255,
-		(hex >> 16) & 0xff / 255,
-		(hex >> 8) & 0xff / 255,
-		(hex & 0xff) / 255,
-	};
-}
-
-fn cb_gpu_reset(_: *c.struct_wl_listener, _: *anyopaque) void {
+fn cb_gpu_reset(_: ?*c.struct_wl_listener, _: ?*anyopaque) void {
 	const old_renderer, const old_alloc = .{ renderer, alloc };
 	defer {
 		c.wlr_allocator_destroy(old_alloc);
@@ -277,9 +182,8 @@ fn cb_gpu_reset(_: *c.struct_wl_listener, _: *anyopaque) void {
 	while (&m.link != &mons) : (m = c.wl_container_of(m.link.next, m, "link"))
 		c.wlr_output_init_render(m.output, alloc, renderer);
 }
-
-fn cb_urgent(_: *c.wl_listener, data: *anyopaque) void {
-	const event: *c.wlr_xdg_activation_v1_request_activate_event = @ptrCast(data);
+fn cb_urgent(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	const event: *c.wlr_xdg_activation_v1_request_activate_event = @ptrCast(data.?);
 	const client: ?*Client = null;
 	toplevel_from_wlr_surface(event.surface, &client, null);
 	if (client == null or c == selmon.topmost_client()) return;
@@ -289,13 +193,35 @@ fn cb_urgent(_: *c.wl_listener, data: *anyopaque) void {
 	if (client.get_surface().mapped)
 		client.set_border_color(constants.config.urgentcolor);
 }
+fn cb_power_mgr_set_mode(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	const event: *c.struct_wlr_output_power_v1_set_mode_event = @ptrCast(data);
+	const state: c.wlr_output_state = undefined;
+	@memset(state, 0);
+
+	const mon: *Monitor = event.output.*.data orelse return;
+	mon.gamma_lut_changed = 1;
+
+	c.wlr_output_state_set_enabled(&state, event.mode);
+	c.wlr_output_commit_state(mon.output, &state);
+
+	mon.asleep = !event.mode;
+	cb_update_monitors(null, null);
+}
+fn cb_update_monitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	const config: *c.struct_wlr_output_configuration_v1 =
+		c.wlr_output_configuration_v1_create();
+	var config_head: *c.struct_wlr_output_configuration_head_v1 = undefined;
+
+	var m: *Monitor = undefined;
+	m = // TODO
+}
 
 inline fn toplevel_from_wlr_surface(
 	sur: ?*c.wlr_surface,
 	cl_ptr: ?**const Client,
 	lysur_ptr: ?**const LayerSurface
 ) i32 {
-	var client_type = ClientType.invalid;
+	var client_type = Client.Type.invalid;
 	var client: *Client = undefined;
 	var our_ls: *LayerSurface = undefined;
 
