@@ -5,14 +5,10 @@ const constants = @import("constants.zig");
 const log = @import("log.zig");
 const ctx = @import("globals.zig");
 
-const AllocatorWrapper = @import("allocator.zig").AllocatorWrapper;
-
 const Generic = error.Generic;
 
 pub fn main() u8 {
-	var aw = AllocatorWrapper.init();
-	defer aw.deinit();
-	const gpa = aw.allocator();
+	ctx.init_allocator();
 
 	defer {
 		log.flush_stderr();
@@ -22,7 +18,7 @@ pub fn main() u8 {
 	const stat = handle_args();
 	if (stat) |s| return s;
 
-	if (!(std.process.hasEnvVar(gpa, "XDG_RUNTIME_DIR") catch {
+	if (!(std.process.hasEnvVar(ctx.gpa, "XDG_RUNTIME_DIR") catch {
 		log.errln("Failed to check if the envvar XDG_RUNTIME_DIR is set!", .{});
 		return 1;
 	})) {
@@ -31,6 +27,8 @@ pub fn main() u8 {
 	}
 
 	ctx.init() catch return 1;
+	defer ctx.deinit();
+
 	return 0;
 }
 

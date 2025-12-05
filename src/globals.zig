@@ -4,9 +4,12 @@ const linux = std.os.linux;
 
 const c = @import("c.zig").c;
 const constants = @import("constants.zig");
+const listeners = @import("listeners.zig");
 const log = @import("log.zig");
 
+const AllocatorWrapper = @import("allocator.zig").AllocatorWrapper;
 const Client = @import("Client.zig");
+const Layout = @import("Layout.zig");
 const Monitor = @import("Monitor.zig");
 
 const Generic = error.Generic;
@@ -23,10 +26,6 @@ const LayerSurface = struct {
 	mapped: i32,
 	layer_surface: *c.wlr_layer_surface_v1
 };
-const Layout = struct {
-	symbol: []const u8,
-	arrange: *const fn (*Monitor) void
-};
 
 const Layer = enum(u8) {
 	background,
@@ -40,28 +39,29 @@ const Layer = enum(u8) {
 };
 const NUM_LAYERS = @typeInfo(Layer).@"enum".fields.len;
 
-const gpu_reset = c.struct_wl_listener{ .notify = cb_gpu_reset };
-const request_activate = c.struct_wl_listener{ .notify = cb_urgent };
-const output_power_mgr_set_mode = c.struct_wl_listener{ .notify = cb_power_mgr_set_mode };
+pub var aw: AllocatorWrapper = undefined;
+pub var gpa: std.mem.Allocator = undefined;
 
-var activation: *c.wlr_xdg_activation_v1 = undefined;
-var alloc: *c.struct_wlr_allocator = undefined;
-var backend: *c.struct_wlr_backend = undefined;
-var compositor: *c.wlr_compositor = undefined;
-var display: *c.struct_wl_display = undefined;
-var drag_icon: *c.struct_wlr_scene_tree = undefined;
-var event_loop: *c.struct_wl_event_loop = undefined;
-var layers: [NUM_LAYERS]*c.struct_wlr_scene_tree = undefined;
-var mons: c.wl_list = undefined;
-var selmon: *Monitor = undefined;
-var renderer: *c.struct_wlr_renderer = undefined;
-var root_bg: *c.struct_wlr_scene_rect = undefined;
-var scene: *c.struct_wlr_scene = undefined;
-var session: *c.struct_wlr_session = undefined;
+pub var activation: *c.wlr_xdg_activation_v1 = undefined;
+pub var alloc: *c.struct_wlr_allocator = undefined;
+pub var backend: *c.struct_wlr_backend = undefined;
+pub var compositor: *c.wlr_compositor = undefined;
+pub var display: *c.struct_wl_display = undefined;
+pub var drag_icon: *c.struct_wlr_scene_tree = undefined;
+pub var event_loop: *c.struct_wl_event_loop = undefined;
+pub var layers: [NUM_LAYERS]*c.struct_wlr_scene_tree = undefined;
+pub var monitors: c.wl_list = undefined;
+pub var renderer: *c.struct_wlr_renderer = undefined;
+pub var root_bg: *c.struct_wlr_scene_rect = undefined;
+pub var scene: *c.struct_wlr_scene = undefined;
+pub var session: *c.struct_wlr_session = undefined;
 
-var fstack: c.struct_wl_list = undefined;
+pub var output_layout: *c.struct_wlr_output_layout = undefined;
+pub var selmon: *Monitor = undefined;
 
-var power_mgr: *c.struct_wlr_output_power_manager_v1 = undefined;
+pub var fstack: c.struct_wl_list = undefined;
+
+pub var power_mgr: *c.struct_wlr_output_power_manager_v1 = undefined;
 
 pub fn init() !void {
 	// Reset signal handlers for SIGCHLD, SIGINT, SIGTERM and SIGPIPE
@@ -101,7 +101,7 @@ pub fn init() !void {
 		log.errln("wlroots: Failed to create renderer!", .{});
 		return Generic;
 	};
-	c.wl_signal_add(&renderer.events.lost, &gpu_reset);
+	c.wl_signal_add(&renderer.events.lost, &listeners.gpu_reset);
 
 	c.wlr_renderer_init_wl_shm(renderer, display);
 
@@ -134,7 +134,7 @@ pub fn init() !void {
 	c.wlr_alpha_modifier_v1_create(display);
 
 	activation = c.wlr_xdg_activation_v1_create(display);
-	c.wl_signal_add(&activation.events.request_activate, &request_activate);
+	c.wl_signal_add(&activation.events.request_activate, &listeners.request_activate);
 
 	c.wlr_scene_set_gamma_control_manager_v1(
 		scene,
@@ -142,9 +142,31 @@ pub fn init() !void {
 	);
 
 	power_mgr = c.wlr_output_power_manager_v1_create(display);
-	c.wl_signal_add(&power_mgr.events.set_mode, &output_power_mgr_set_node);
+	c.wl_signal_add(&power_mgr.events.set_mode, &listeners.output_power_mgr_set_node);
+
+	output_layout = c.wlr_output_layout_create(display);
+	c.wl_signal_add(&output_layout.events.change, &listeners.layout_change);
+
+	c.wlr_xdg_output_manager_v1_create(display, output_layout);
+
+	c.wl_list_init(&monitors);
+	c.wl_signal_add(&backend.events.new_output, &listeners.new_output);
 
 	// TODO NOW
+}
+
+pub fn init_allocator() void {
+	aw = AllocatorWrapper.init();
+	gpa = aw.allocator();
+}
+
+pub fn deinit() void {
+	aw.deinit();
+}
+
+pub fn die(fmt: []const u8, args: anytype) void {
+	log.errln(fmt, args);
+	std.process.exit(1);
 }
 
 fn handlesig(signo: i32) callconv(.c) void {
@@ -153,67 +175,6 @@ fn handlesig(signo: i32) callconv(.c) void {
 		while (linux.waitpid(-1, &idc, linux.W.NOHANG) > 0) {} // TODO oh god
 	else if (signo == linux.SIG.INT or signo == linux.SIG.TERM)
 		c.wl_display_terminate(display);
-}
-
-fn cb_gpu_reset(_: ?*c.struct_wl_listener, _: ?*anyopaque) void {
-	const old_renderer, const old_alloc = .{ renderer, alloc };
-	defer {
-		c.wlr_allocator_destroy(old_alloc);
-		c.wlr_renderer_destroy(old_renderer);
-	}
-
-	renderer = c.wlr_renderer_autocreate(backend) orelse {
-		log.errln("wlroots: Failed to create renderer!", .{});
-		return Generic;
-	};
-
-	alloc = c.wlr_allocator_autocreate(backend, renderer) orelse {
-		log.errln("wlroots: Failed to create allocator!", .{});
-		return Generic;
-	};
-
-	c.wl_list_remove(&gpu_reset.link);
-	c.wl_signal_add(&renderer.events.lost, &gpu_reset);
-
-	c.wlr_compositor_set_renderer(compositor, renderer);
-
-	var m: *Monitor = undefined;
-	m = c.wl_container_of(mons.next, m, "link");
-	while (&m.link != &mons) : (m = c.wl_container_of(m.link.next, m, "link"))
-		c.wlr_output_init_render(m.output, alloc, renderer);
-}
-fn cb_urgent(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const event: *c.wlr_xdg_activation_v1_request_activate_event = @ptrCast(data.?);
-	const client: ?*Client = null;
-	toplevel_from_wlr_surface(event.surface, &client, null);
-	if (client == null or c == selmon.topmost_client()) return;
-
-	client.is_urgent = true;
-
-	if (client.get_surface().mapped)
-		client.set_border_color(constants.config.urgentcolor);
-}
-fn cb_power_mgr_set_mode(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const event: *c.struct_wlr_output_power_v1_set_mode_event = @ptrCast(data);
-	const state: c.wlr_output_state = undefined;
-	@memset(state, 0);
-
-	const mon: *Monitor = event.output.*.data orelse return;
-	mon.gamma_lut_changed = 1;
-
-	c.wlr_output_state_set_enabled(&state, event.mode);
-	c.wlr_output_commit_state(mon.output, &state);
-
-	mon.asleep = !event.mode;
-	cb_update_monitors(null, null);
-}
-fn cb_update_monitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const config: *c.struct_wlr_output_configuration_v1 =
-		c.wlr_output_configuration_v1_create();
-	var config_head: *c.struct_wlr_output_configuration_head_v1 = undefined;
-
-	var m: *Monitor = undefined;
-	m = // TODO
 }
 
 inline fn toplevel_from_wlr_surface(

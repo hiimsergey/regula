@@ -3,7 +3,7 @@ const c = @import("c.zig").c;
 
 const Monitor = @import("Monitor.zig");
 
-pub const Type = enum(i8) {invalid, xdg_shell, layer_shell, x11};
+pub const Type = enum(i8) {invalid = -1, xdg_shell, layer_shell, x11};
 
 const Self = @This();
 kind: Type,

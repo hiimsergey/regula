@@ -17,7 +17,7 @@ destroy_lock_surface: c.wl_listener,
 lock_surface: *c.wlr_session_lock_surface_v1,
 monitor: c.wlr_box,
 window: c.wlr_box,
-layers: c.wl_list[4],
+layers: [4]c.wl_list,
 layout: [2]*Layout,
 seltags: u32,
 sellt: u32,
@@ -27,6 +27,17 @@ gamma_lut_changed: i32,
 nmaster: i32,
 ltsymbol: [16]u8,
 asleep: i32,
+
+pub const Rule = struct {
+	name: ?[]const u8,
+	mfact: f32,
+	n_master: u32,
+	scale: f32,
+	layout: *const Layout,
+	rr: c.enum_wl_output_transform,
+	x: u32,
+	y: u32
+};
 
 fn topmost_client(self: *Self) ?*Client {
 	var cl: *Client = undefined;
