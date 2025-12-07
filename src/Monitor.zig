@@ -35,8 +35,8 @@ pub const Rule = struct {
 	scale: f32,
 	layout: *const Layout,
 	rr: c.enum_wl_output_transform,
-	x: u32,
-	y: u32
+	x: i32,
+	y: i32
 };
 
 fn topmost_client(self: *Self) ?*Client {

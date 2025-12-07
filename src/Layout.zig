@@ -1,4 +1,4 @@
 const Monitor = @import("Monitor.zig");
 
 symbol: []const u8,
-arrange: *const fn (*Monitor) void
+arrange: ?*const fn (*Monitor) void

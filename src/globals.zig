@@ -59,6 +59,8 @@ pub var session: *c.struct_wlr_session = undefined;
 pub var output_layout: *c.struct_wlr_output_layout = undefined;
 pub var selmon: *Monitor = undefined;
 
+pub var xdg_shell: *c.struct_wlr_xdg_shell = undefined;
+pub var clients: c.struct_wl_list = undefined;
 pub var fstack: c.struct_wl_list = undefined;
 
 pub var power_mgr: *c.struct_wlr_output_power_manager_v1 = undefined;
@@ -151,6 +153,13 @@ pub fn init() !void {
 
 	c.wl_list_init(&monitors);
 	c.wl_signal_add(&backend.events.new_output, &listeners.new_output);
+
+	c.wl_list_init(&clients);
+	c.wl_list_init(&fstack);
+
+	xdg_shell = c.wlr_xdg_shell_create(display, 6);
+	c.wl_signal_add(&xdg_shell.events.new_toplevel, listeners.new_xdg_toplevel);
+	c.wl_signal_add(&xdg_shell.events.new_popup, listeners.new_xdg_popup);
 
 	// TODO NOW
 }

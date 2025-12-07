@@ -1,5 +1,11 @@
 const std = @import("std");
 
+const c = @import("c.zig").c;
+const ctx = @import("globals.zig");
+
+const Layout = @import("Layout.zig");
+const Monitor = @import("Monitor.zig");
+
 pub const HELP =
 	\\RegulaWM - an extensible Wayland compositor with sane defaults
 	\\
@@ -9,7 +15,39 @@ pub const HELP =
 	\\    -v, --version              print version and quit
 ;
 
+pub const LAYOUTS = [_]Layout{
+	.{ .symbol = "[]=", arrange.tile    },
+	.{ .symbol = "><>", null            },
+	.{ .symbol = "[]=", arrange.monocle },
+};
+
+pub const MONRULES = [_]Monitor.Rule{
+	.{
+		.name = null,
+		.mfact = 0.55,
+		.n_master = 1,
+		.scale = 1,
+		.layout = &LAYOUTS[0],
+		.rr = c.WL_OUTPUT_TRANSFORM_NORMAL,
+		.x = -1, .y = -1
+	}
+};
+
 pub const VERSION = "0.0.0";
+
+pub const arrange = struct {
+	fn monocle(mon: *const Monitor) void {
+		var cl: ?*Client = undefined;
+		cl = c.wl_container_of(ctx.clients.next, cl, "link");
+		while (&cl.?.link != &ctx.clients) : (cl = c.wl_container_of(cl.?.link.next, cl.?, "link")) {
+			if (!cl.?.visible_on(mon) or cl.?.is_floating or c.?.is_fullscreen) continue;
+			resize(cl.?, mon.w, 0); // TODO NOW NOW
+		}
+
+		cl = mon.topmost_client();
+		if (cl != null) c.wlr_scene_node_raise_to_top(&cl.?.scene.node);
+	}
+};
 
 // TODO TEMPORARY before making a proper config framework
 pub const config = struct {
