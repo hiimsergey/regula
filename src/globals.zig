@@ -57,6 +57,7 @@ pub var scene: *c.struct_wlr_scene = undefined;
 pub var session: *c.struct_wlr_session = undefined;
 
 pub var output_layout: *c.struct_wlr_output_layout = undefined;
+pub var sgeom: c.struct_wlr_box = undefined;
 pub var selmon: *Monitor = undefined;
 
 pub var xdg_shell: *c.struct_wlr_xdg_shell = undefined;

@@ -37,15 +37,15 @@ pub const VERSION = "0.0.0";
 
 pub const arrange = struct {
 	fn monocle(mon: *const Monitor) void {
-		var cl: ?*Client = undefined;
+		var cl: *Client = undefined;
 		cl = c.wl_container_of(ctx.clients.next, cl, "link");
-		while (&cl.?.link != &ctx.clients) : (cl = c.wl_container_of(cl.?.link.next, cl.?, "link")) {
-			if (!cl.?.visible_on(mon) or cl.?.is_floating or c.?.is_fullscreen) continue;
-			resize(cl.?, mon.w, 0); // TODO NOW NOW
+		while (&cl.link != &ctx.clients) : (cl = c.wl_container_of(cl.link.next, cl, "link")) {
+			if (!cl.visible_on(mon) or cl.is_floating or c.is_fullscreen) continue;
+			resize(cl, mon.w, 0); // TODO NOW NOW
 		}
 
-		cl = mon.topmost_client();
-		if (cl != null) c.wlr_scene_node_raise_to_top(&cl.?.scene.node);
+		cl = mon.topmost_client() orelse return;
+		c.wlr_scene_node_raise_to_top(&cl.scene.node);
 	}
 };
 
