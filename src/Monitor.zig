@@ -24,7 +24,7 @@ sellt: u32,
 tagset: [2]u32,
 mfact: f32,
 gamma_lut_changed: i32,
-nmaster: i32,
+n_master: i32,
 ltsymbol: [16]u8,
 asleep: i32,
 

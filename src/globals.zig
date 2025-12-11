@@ -39,6 +39,13 @@ const Layer = enum(u8) {
 };
 const NUM_LAYERS = @typeInfo(Layer).@"enum".fields.len;
 
+pub const layer_map = [_]u8{
+	@intFromEnum(Layer.background),
+	@intFromEnum(Layer.bottom),
+	@intFromEnum(Layer.top),
+	@intFromEnum(Layer.overlay)
+};
+
 pub var aw: AllocatorWrapper = undefined;
 pub var gpa: std.mem.Allocator = undefined;
 
@@ -58,11 +65,12 @@ pub var session: *c.struct_wlr_session = undefined;
 
 pub var output_layout: *c.struct_wlr_output_layout = undefined;
 pub var sgeom: c.struct_wlr_box = undefined;
-pub var selmon: *Monitor = undefined;
+pub var selmon: ?*Monitor = undefined;
 
 pub var xdg_shell: *c.struct_wlr_xdg_shell = undefined;
 pub var clients: c.struct_wl_list = undefined;
 pub var fstack: c.struct_wl_list = undefined;
+pub var layer_shell: *c.struct_wlr_layer_shell_v1 = undefined;
 
 pub var power_mgr: *c.struct_wlr_output_power_manager_v1 = undefined;
 
@@ -159,10 +167,11 @@ pub fn init() !void {
 	c.wl_list_init(&fstack);
 
 	xdg_shell = c.wlr_xdg_shell_create(display, 6);
-	c.wl_signal_add(&xdg_shell.events.new_toplevel, listeners.new_xdg_toplevel);
-	c.wl_signal_add(&xdg_shell.events.new_popup, listeners.new_xdg_popup);
+	c.wl_signal_add(&xdg_shell.events.new_toplevel, &listeners.new_xdg_toplevel);
+	c.wl_signal_add(&xdg_shell.events.new_popup, &listeners.new_xdg_popup);
 
-	// TODO NOW
+	layer_shell = c.wlr_layer_shell_v1_create(display, 3);
+	c.wl_signal_add(&layer_shell.events.new_surface, &listeners.new_layer_surcace);
 }
 
 pub fn init_allocator() void {
@@ -218,29 +227,27 @@ inline fn toplevel_from_wlr_surface(
 			break :bod;
 		}
 
-		// TODO READ can you cast c pointers to optional pointers?
-		// ie can you use orelse?
-		const xdg_surface: ?*c.wlr_xdg_surface =
+		const xdg_surface: *c.wlr_xdg_surface =
 			c.wlr_xdg_surface_try_from_wlr_surface(root_surface);
-		while (@intFromPtr(xdg_surface) != 0) {
+		while (xdg_surface) |xdgsur| {
 			var tmp_xdgsur: ?*c.wlr_xdg_surface = null;
-			switch (xdg_surface.role) {
+			switch (xdgsur.role) {
 				c.WLR_XDG_SURFACE_ROLE_POPUP => {
-					if (xdg_surface.unnamed_0.popup == null or
-						xdg_surface.unnamed_0.popup.*.parent == null)
+					if (xdgsur.unnamed_0.popup == null or
+						xdgsur.unnamed_0.popup.*.parent == null)
 						return .invalid;
 
 					tmp_xdgsur =
-						c.wlr_xdg_surface_try_from_wlr_surface(xdg_surface.unnamed_0.popup.*.parent)
+						c.wlr_xdg_surface_try_from_wlr_surface(xdgsur.unnamed_0.popup.*.parent)
 					orelse return toplevel_from_wlr_surface(
-						xdg_surface.unnamed_0.popup.*.parent,
+						xdgsur.unnamed_0.popup.*.parent,
 						cl_ptr, lysur_ptr
 					);
 
-					xdg_surface = tmp_xdgsur;
+					xdgsur = tmp_xdgsur;
 				},
 				c.WLR_XDG_SURFACE_ROLE_TOPLEVEL => {
-					client = @ptrCast(xdg_surface.data);
+					client = @ptrCast(xdgsur.data);
 					client_type = client.kind;
 					break :bod;
 				},
