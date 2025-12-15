@@ -1,8 +1,10 @@
+const std = @import("std");
+
 const c = @import("c.zig").c;
 const constants = @import("constants.zig");
 const ctx = @import("globals.zig");
 
-const LayoutSurface = @import("LayerSurface.zig");
+const LayerSurface = @import("LayerSurface.zig");
 const Monitor = @import("Monitor.zig");
 
 const gpu_reset = c.struct_wl_listener{ .notify = gpu_reset };
@@ -28,15 +30,21 @@ fn create_layer_surface(_: ?*c.wl_listener, data: ?*anyopaque) void {
 		}
 	}
 
-	var ls: *LayerSurface = undefined;
-	// TODO NOW NOW
+	layer_surface.data = ctx.gpa.alloc(LayerSurface, 1) catch ctx.die("Failed to allocate memory!", .{});
+	var ls: *LayerSurface = layer_surface.data;
+	ls.kind = .layer_shell;
+
+	ls.surface_commit.notify = commit_layer_surface_notify;
+	c.wl_signal_add(&sur.events.commit, ls.surface_commit.notify, &ls.surface_commit);
+
+	// TODO
 }
 fn create_monitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	const output: *c.struct_wlr_output = @ptrCast(data);
 
 	if (!c.wlr_output_init_render(output, ctx.alloc, ctx.renderer)) return;
 
-	var mon: *Monitor = ctx.gpa.alloc(Monitor, 1) catch die("Failed to allocate memory!", .{});
+	var mon: *Monitor = ctx.gpa.alloc(Monitor, 1) catch ctx.die("Failed to allocate memory!", .{});
 	output.data = mon;
 	mon.output = output;
 
@@ -47,8 +55,22 @@ fn create_monitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	@memset(mon.tagset[0..2], 1);
 
 	for (constants.MONRULES) |monrule| {
-		// TODO NOW
+		if (monrule.name != null and
+			!std.mem.containsAtLeast(u8, output.name, 1, monrule.name.?)) continue;
+
+		mon.monitor.x = monrule.x;
+		mon.monitor.y = monrule.y;
+		mon.mfact = monrule.mfact;
+		mon.n_master = monrule.n_master;
+		mon.layout[0] = monrule.layout;
+		mon.layout[1] = lay
+		@memcpy(mon.ltsymbol, mon.layout[mon.sellt].symbol[0..mon.ltsymbol.len]);
+		c.wlr_output_state_set_scale(&state, monrule.scale);
+		c.wlr_output_state_set_transform(&state, monrule.rr);
+		break;
 	}
+
+	// TODO NOW
 }
 fn create_notify(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
