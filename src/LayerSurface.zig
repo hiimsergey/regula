@@ -5,7 +5,7 @@ const Monitor = @import("Monitor.zig");
 
 const Self = @This();
 kind: Client.Type = .layer_shell,
-mon: *Monitor,
+monitor: *Monitor,
 scene: *c.struct_wlr_scene_tree,
 popups: *c.struct_wlr_scene_tree,
 scene_layer: *c.struct_wlr_scene_layer_surface_v1,

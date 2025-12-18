@@ -14,6 +14,18 @@ const Monitor = @import("Monitor.zig");
 
 const Generic = error.Generic;
 
+pub const Layer = enum(u8) {
+	background,
+	bottom,
+	tile,
+	float,
+	top,
+	fs,
+	overlay,
+	block
+};
+pub const NUM_LAYERS = @typeInfo(Layer).@"enum".fields.len;
+
 const LayerSurface = struct {
 	// NOTE must keep this field first
 	kind: c_uint,
@@ -26,18 +38,6 @@ const LayerSurface = struct {
 	mapped: i32,
 	layer_surface: *c.wlr_layer_surface_v1
 };
-
-const Layer = enum(u8) {
-	background,
-	bottom,
-	tile,
-	float,
-	top,
-	fs,
-	overlay,
-	block
-};
-const NUM_LAYERS = @typeInfo(Layer).@"enum".fields.len;
 
 pub const layer_map = [_]u8{
 	@intFromEnum(Layer.background),
@@ -186,6 +186,16 @@ pub fn deinit() void {
 pub fn die(fmt: []const u8, args: anytype) void {
 	log.errln(fmt, args);
 	std.process.exit(1);
+}
+
+// TODO FINAL CONSIDER REPLACE struct_foo -> foo
+pub fn listen_wrapper(
+	event: c.struct_wl_signal,
+	listener: c.struct_wl_listener,
+	handler: fn (c.wl_listener, *anyopaque) void
+) void {
+	listener.notify = handler;
+	c.wl_signal_add(event, handler, listener);
 }
 
 fn handlesig(signo: i32) callconv(.c) void {

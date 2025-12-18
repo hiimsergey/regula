@@ -16,6 +16,8 @@ pub const HELP =
 	\\    -v, --version              print version and quit
 ;
 
+pub const FULLSCREEN_BG = [_]f32{0.1, 0.1, 0.1, 1.0};
+
 pub const LAYOUTS = [_]Layout{
 	.{ .symbol = "[]=", .arrange = arrange.tile    },
 	.{ .symbol = "><>", .arrange = null            },
