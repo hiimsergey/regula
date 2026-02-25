@@ -1,23 +1,22 @@
 const std = @import("std");
-
 const c = @import("c.zig").c;
 const constants = @import("constants.zig");
 const log = @import("log.zig");
 const ctx = @import("globals.zig");
 
-const Generic = error.Generic;
+const E = error.Generic;
 
 pub fn main() u8 {
 	ctx.init_allocator();
 
 	defer {
-		log.flush_stderr();
-		log.flush_stdout();
+		log.flushStderr();
+		log.flushStdout();
 	}
 
-	const stat = handle_args();
-	if (stat) |s| return s;
+	if (handleArgs()) |stat| return stat;
 
+	// TODO cant you just use it already?
 	if (!(std.process.hasEnvVar(ctx.gpa, "XDG_RUNTIME_DIR") catch {
 		log.errln("Failed to check if the envvar XDG_RUNTIME_DIR is set!", .{});
 		return 1;
@@ -34,7 +33,7 @@ pub fn main() u8 {
 
 /// Returns the error code the compositor should exit with or `null` if it should keep
 /// running.
-fn handle_args() ?u8 {
+fn handleArgs() ?u8 {
 	var args = std.process.args();
 	_ = args.skip(); // Skip executable name
 	const flag = args.next() orelse return null;

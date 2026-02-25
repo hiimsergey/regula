@@ -1,11 +1,10 @@
 const c = @import("c.zig").c;
-
 const ctx = @import("globals.zig");
 
 const Client = @import("Client.zig");
 const Layout = @import("Layout.zig");
-
 const Self = @This();
+
 link: c.wl_list,
 output: *c.wlr_output,
 scene_output: *c.wlr_scene_output,
@@ -34,16 +33,16 @@ pub const Rule = struct {
 	n_master: u32,
 	scale: f32,
 	layout: *const Layout,
-	rr: c.enum_wl_output_transform,
+	rr: c.wl_output_transform,
 	x: i32,
 	y: i32
 };
 
-fn topmost_client(self: *Self) ?*Client {
+fn topmostClient(self: *Self) ?*Client {
 	var cl: *Client = undefined;
 	cl = c.wl_container_of(ctx.fstack.next, cl, "flink");
 	while (&cl.flink != &ctx.fstack) :
 		(cl = c.wl_container_of(cl.flink.next, cl, "flink"))
-		if (cl.visible_on(self)) return cl;
+		if (cl.visibleOn(self)) return cl;
 	return null;
 }

@@ -13,9 +13,9 @@ pub fn errln(comptime fmt: []const u8, args: anytype) void {
 	stderr.interface.print("error: " ++ fmt ++ "\n", args) catch {};
 }
 
-pub fn flush_stdout() void {
+pub fn flushStdout() void {
 	stdout.interface.flush() catch {};
 }
-pub fn flush_stderr() void {
+pub fn flushStderr() void {
 	stderr.interface.flush() catch {};
 }

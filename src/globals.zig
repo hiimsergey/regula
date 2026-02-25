@@ -1,18 +1,16 @@
 const config = @import("config");
 const std = @import("std");
 const linux = std.os.linux;
-
 const c = @import("c.zig").c;
 const constants = @import("constants.zig");
 const listeners = @import("listeners.zig");
 const log = @import("log.zig");
 
-const AllocatorWrapper = @import("allocator.zig").AllocatorWrapper;
+const AllocatorWrapper = @import("AllocatorWrapper.zig");
 const Client = @import("Client.zig");
+const E = error.Generic;
 const Layout = @import("Layout.zig");
 const Monitor = @import("Monitor.zig");
-
-const Generic = error.Generic;
 
 pub const Layer = enum(u8) {
 	background,
@@ -22,57 +20,57 @@ pub const Layer = enum(u8) {
 	top,
 	fs,
 	overlay,
-	block
+	block,
+
+	const len = @typeInfo(Layer).@"enum".fields.len;
+	const map = [_]u8{
+		@intFromEnum(Layer.background),
+		@intFromEnum(Layer.bottom),
+		@intFromEnum(Layer.top),
+		@intFromEnum(Layer.overlay)
+	};
 };
-pub const NUM_LAYERS = @typeInfo(Layer).@"enum".fields.len;
 
 const LayerSurface = struct {
 	// NOTE must keep this field first
 	kind: c_uint,
 
 	mon: *Monitor,
-	scene: *c.struct_wlr_scene_tree,
-	popups: *c.struct_wlr_scene_tree,
-	scene_layer: *c.struct_wlr_scene_layer_surface_v1,
+	scene: *c.wlr_scene_tree,
+	popups: *c.wlr_scene_tree,
+	scene_layer: *c.wlr_scene_layer_surface_v1,
 	link: c.wl_list,
 	mapped: i32,
 	layer_surface: *c.wlr_layer_surface_v1
-};
-
-pub const layer_map = [_]u8{
-	@intFromEnum(Layer.background),
-	@intFromEnum(Layer.bottom),
-	@intFromEnum(Layer.top),
-	@intFromEnum(Layer.overlay)
 };
 
 pub var aw: AllocatorWrapper = undefined;
 pub var gpa: std.mem.Allocator = undefined;
 
 pub var activation: *c.wlr_xdg_activation_v1 = undefined;
-pub var alloc: *c.struct_wlr_allocator = undefined;
-pub var backend: *c.struct_wlr_backend = undefined;
+pub var alloc: *c.wlr_allocator = undefined;
+pub var backend: *c.wlr_backend = undefined;
 pub var compositor: *c.wlr_compositor = undefined;
-pub var display: *c.struct_wl_display = undefined;
-pub var drag_icon: *c.struct_wlr_scene_tree = undefined;
-pub var event_loop: *c.struct_wl_event_loop = undefined;
-pub var layers: [NUM_LAYERS]*c.struct_wlr_scene_tree = undefined;
+pub var display: *c.wl_display = undefined;
+pub var drag_icon: *c.wlr_scene_tree = undefined;
+pub var event_loop: *c.wl_event_loop = undefined;
+pub var layers: [Layer.len]*c.wlr_scene_tree = undefined;
 pub var monitors: c.wl_list = undefined;
-pub var renderer: *c.struct_wlr_renderer = undefined;
-pub var root_bg: *c.struct_wlr_scene_rect = undefined;
-pub var scene: *c.struct_wlr_scene = undefined;
-pub var session: *c.struct_wlr_session = undefined;
+pub var renderer: *c.wlr_renderer = undefined;
+pub var root_bg: *c.wlr_scene_rect = undefined;
+pub var scene: *c.wlr_scene = undefined;
+pub var session: *c.wlr_session = undefined;
 
-pub var output_layout: *c.struct_wlr_output_layout = undefined;
-pub var sgeom: c.struct_wlr_box = undefined;
+pub var output_layout: *c.wlr_output_layout = undefined;
+pub var sgeom: c.wlr_box = undefined;
 pub var selmon: ?*Monitor = undefined;
 
-pub var xdg_shell: *c.struct_wlr_xdg_shell = undefined;
-pub var clients: c.struct_wl_list = undefined;
-pub var fstack: c.struct_wl_list = undefined;
-pub var layer_shell: *c.struct_wlr_layer_shell_v1 = undefined;
+pub var xdg_shell: *c.wlr_xdg_shell = undefined;
+pub var clients: c.wl_list = undefined;
+pub var fstack: c.wl_list = undefined;
+pub var layer_shell: *c.wlr_layer_shell_v1 = undefined;
 
-pub var power_mgr: *c.struct_wlr_output_power_manager_v1 = undefined;
+pub var power_mgr: *c.wlr_output_power_manager_v1 = undefined;
 
 pub fn init() !void {
 	// Reset signal handlers for SIGCHLD, SIGINT, SIGTERM and SIGPIPE
@@ -92,14 +90,14 @@ pub fn init() !void {
 
 	c.wlr_log_init(c.WLR_ERROR, null);
 
-	display = c.wl_display_create() orelse return Generic;
-	event_loop = c.wl_display_get_event_loop(display) orelse return Generic;
+	display = c.wl_display_create() orelse return E;
+	event_loop = c.wl_display_get_event_loop(display) orelse return E;
 	backend = c.wlr_backend_autocreate(event_loop, @ptrCast(&session)) orelse {
 		log.errln("wlroots: Failed to create backend!", .{});
-		return Generic;
+		return E;
 	};
 	scene = c.wlr_scene_create();
-	root_bg = c.wlr_scene_rect_create(&scene.tree, 0, 0, constants.config.rootcolor);
+	root_bg = c.wlr_scene_rect_create(&scene.tree, 0, 0, constants.config.root_color);
 
 	for (&layers) |*layer| layer.* = c.wlr_scene_tree_create(&scene.tree);
 	drag_icon = c.wlr_scene_tree_create(&scene.tree);
@@ -110,7 +108,7 @@ pub fn init() !void {
 
 	renderer = c.wlr_renderer_autocreate(backend) orelse {
 		log.errln("wlroots: Failed to create renderer!", .{});
-		return Generic;
+		return E;
 	};
 	c.wl_signal_add(&renderer.events.lost, &listeners.gpu_reset);
 
@@ -128,7 +126,7 @@ pub fn init() !void {
 
 	alloc = c.wlr_allocator_autocreate(backend, renderer) orelse {
 		log.errln("wlroots: Failed to create allocator!", .{});
-		return Generic;
+		return E;
 	};
 
 	compositor = c.wlr_compositor_create(display, 6, renderer);
@@ -174,24 +172,26 @@ pub fn init() !void {
 	c.wl_signal_add(&layer_shell.events.new_surface, &listeners.new_layer_surcace);
 }
 
-pub fn init_allocator() void {
+pub fn initAllocator() void {
 	aw = AllocatorWrapper.init();
-	gpa = aw.allocator();
+	gpa = aw.allocator(std.heap.c_allocator);
 }
 
 pub fn deinit() void {
 	aw.deinit();
+	// TODO CONSIDER freeing global stuff here
 }
 
-pub fn die(fmt: []const u8, args: anytype) void {
+pub fn die(comptime fmt: []const u8, args: anytype) void {
 	log.errln(fmt, args);
+	deinit();
 	std.process.exit(1);
 }
 
-// TODO FINAL CONSIDER REPLACE struct_foo -> foo
-pub fn listen_wrapper(
-	event: c.struct_wl_signal,
-	listener: c.struct_wl_listener,
+// TODO FINAL CONSIDER REPLACE foo -> foo
+pub fn listenWrapper(
+	event: c.wl_signal,
+	listener: c.wl_listener,
 	handler: fn (c.wl_listener, *anyopaque) void
 ) void {
 	listener.notify = handler;
@@ -206,7 +206,7 @@ fn handlesig(signo: i32) callconv(.c) void {
 		c.wl_display_terminate(display);
 }
 
-inline fn toplevel_from_wlr_surface(
+inline fn toplevelFromWlrSurface(
 	sur: ?*c.wlr_surface,
 	cl_ptr: ?**const Client,
 	lysur_ptr: ?**const LayerSurface
@@ -215,7 +215,7 @@ inline fn toplevel_from_wlr_surface(
 	var client: *Client = undefined;
 	var our_ls: *LayerSurface = undefined;
 
-	bod: {
+	body: {
 		const root_surface: *c.wlr_surface =
 			c.wlr_surface_get_root_surface(sur orelse return -1);
 
@@ -225,7 +225,7 @@ inline fn toplevel_from_wlr_surface(
 			if (@intFromPtr(xsurface) != 0) {
 				client = xsurface.data;
 				client_type = client.type;
-				break :bod;
+				break :body;
 			}
 		}
 
@@ -234,7 +234,7 @@ inline fn toplevel_from_wlr_surface(
 		if (@intFromPtr(layer_surface) != 0) {
 			our_ls = layer_surface.data;
 			client_type = .layer_shell;
-			break :bod;
+			break :body;
 		}
 
 		const xdg_surface: *c.wlr_xdg_surface =
@@ -249,7 +249,7 @@ inline fn toplevel_from_wlr_surface(
 
 					tmp_xdgsur =
 						c.wlr_xdg_surface_try_from_wlr_surface(xdgsur.unnamed_0.popup.*.parent)
-					orelse return toplevel_from_wlr_surface(
+					orelse return toplevelFromWlrSurface(
 						xdgsur.unnamed_0.popup.*.parent,
 						cl_ptr, lysur_ptr
 					);
@@ -259,7 +259,7 @@ inline fn toplevel_from_wlr_surface(
 				c.WLR_XDG_SURFACE_ROLE_TOPLEVEL => {
 					client = @ptrCast(xdgsur.data);
 					client_type = client.kind;
-					break :bod;
+					break :body;
 				},
 				c.WLR_XDG_SURFACE_ROLE_NONE, _ => return .invalid
 			}

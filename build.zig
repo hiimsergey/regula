@@ -12,12 +12,12 @@ pub fn build(b: *Build) void {
 		.root_module = b.createModule(.{
 			.root_source_file = b.path("src/main.zig"),
 			.target = target,
-			.optimize = optimize
+			.optimize = optimize,
+			.link_libc = true
 		})
 	});
 
 	// Linking libraries
-	exe.root_module.link_libc = true;
 	exe.root_module.addIncludePath(b.path("include"));
 	exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/wlroots-0.19" });
 	exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/pixman-1" });

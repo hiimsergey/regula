@@ -1,31 +1,31 @@
 const std = @import("std");
-
 const c = @import("c.zig").c;
 const constants = @import("constants.zig");
 const ctx = @import("globals.zig");
 
+const E = error.Generic;
 const LayerSurface = @import("LayerSurface.zig");
 const Monitor = @import("Monitor.zig");
 
-const gpu_reset = c.struct_wl_listener{ .notify = gpu_reset };
-const layout_change = c.struct_wl_listener{ .notify = update_monitors };
-const new_output = c.struct_wl_listener{ .notify = create_monitor };
-const new_xdg_popup = c.struct_wl_listener{ .notify = create_popup };
-const new_xdg_toplevel = c.struct_wl_listener{ .notify = create_notify };
-const new_layer_surface = c.struct_wl_listener{ .notify = create_layer_surface };
-const output_power_mgr_set_mode = c.struct_wl_listener{ .notify = power_mgr_set_mode };
-const request_activate = c.struct_wl_listener{ .notify = urgent };
+const gpu_reset = c.wl_listener{ .notify = gpuReset };
+const layout_change = c.wl_listener{ .notify = updateMonitors };
+const new_output = c.wl_listener{ .notify = createMonitor };
+const new_xdg_popup = c.wl_listener{ .notify = createPopup };
+const new_xdg_toplevel = c.wl_listener{ .notify = createNotify };
+const new_layer_surface = c.wl_listener{ .notify = createLayerSurface };
+const output_power_mgr_set_mode = c.wl_listener{ .notify = powerMgrSetMode };
+const request_activate = c.wl_listener{ .notify = urgent };
 
-fn cleanup_monitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn cleanupMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
 }
-fn commit_layer_surface_notify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn commitLayerSurfaceNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
 }
-fn create_layer_surface(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const layer_surface: *const c.struct_wlr_layer_surface_v1 = @ptrCast(data);
-	const surface: *const c.struct_wlr_surface = layer_surface.surface;
-	const scene_layer: *const c.struct_wlr_scene_tree =
+fn createLayerSurface(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	const layer_surface: *const c.wlr_layer_surface_v1 = @ptrCast(data);
+	const surface: *const c.wlr_surface = layer_surface.surface;
+	const scene_layer: *const c.wlr_scene_tree =
 		ctx.layers[ctx.layer_map[layer_surface.pending.layer]];
 
 	if (layer_surface == null) {
@@ -36,13 +36,14 @@ fn create_layer_surface(_: ?*c.wl_listener, data: ?*anyopaque) void {
 		}
 	}
 
-	layer_surface.data = ctx.gpa.alloc(LayerSurface, 1) catch ctx.die("Failed to allocate memory!", .{});
+	layer_surface.data = ctx.gpa.alloc(LayerSurface, 1)
+		catch ctx.die("Failed to allocate memory!", .{});
 	var ls: *LayerSurface = layer_surface.data;
 	ls.kind = .layer_shell;
 
-	ctx.listen_wrapper(&surface.events.commit, &ls.surface_commit, commit_layer_surface_notify);
-	ctx.listen_wrapper(&surface.events.unmap, &ls.unmap, unmap_layer_surface_notify);
-	ctx.listen_wrapper(&layer_surface.events.destroy, &ls.destroy, destroy_layer_surface_notify);
+	ctx.listenWrapper(&surface.events.commit, &ls.surface_commit, commitLayerSurfaceNotify);
+	ctx.listenWrapper(&surface.events.unmap, &ls.unmap, unmapLayerSurfaceNotify);
+	ctx.listenWrapper(&layer_surface.events.destroy, &ls.destroy, destroyLayerSurfaceNotify);
 
 	ls.layer_surface = layer_surface;
 	ls.monitor = layer_surface.output.*.data;
@@ -61,12 +62,13 @@ fn create_layer_surface(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	c.wl_list_insert(&ls.monitor.layers[layer_surface.pending.layer], &ls.link);
 	c.wlr_surface_send_enter(surface, layer_surface.output);
 }
-fn create_monitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const output: *c.struct_wlr_output = @ptrCast(data);
+fn createMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	const output: *c.wlr_output = @ptrCast(data);
 
 	if (!c.wlr_output_init_render(output, ctx.alloc, ctx.renderer)) return;
 
-	var mon: *Monitor = ctx.gpa.alloc(Monitor, 1) catch ctx.die("Failed to allocate memory!", .{});
+	var mon: *Monitor = ctx.gpa.alloc(Monitor, 1)
+		catch ctx.die("Failed to allocate memory!", .{});
 	output.data = mon;
 	mon.output = output;
 
@@ -79,7 +81,8 @@ fn create_monitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 
 	for (constants.MONRULES) |monrule| {
 		if (monrule.name != null and
-			!std.mem.containsAtLeast(u8, output.name, 1, monrule.name.?)) continue;
+			!std.mem.containsAtLeast(u8, output.name, 1, monrule.name.?))
+				continue;
 
 		mon.monitor.x = monrule.x;
 		mon.monitor.y = monrule.y;
@@ -87,7 +90,8 @@ fn create_monitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 		mon.n_master = monrule.n_master;
 		mon.layout[0] = monrule.layout;
 		mon.layout[1] = &constants.LAYOUTS[
-			@intFromBool(constants.LAYOUTS.len > 1 and monrule.layout != &constants.LAYOUTS[1])
+			@intFromBool(constants.LAYOUTS.len > 1 and
+				monrule.layout != &constants.LAYOUTS[1])
 		];
 		@memcpy(mon.ltsymbol, mon.layout[mon.sellt].symbol[0..mon.ltsymbol.len]);
 		c.wlr_output_state_set_scale(&state, monrule.scale);
@@ -97,9 +101,9 @@ fn create_monitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 
 	c.wlr_output_state_set_mode(&state, c.wlr_output_preferred_mode(output));
 
-	ctx.listen_wrapper(&output.events.frame, &mon.frame, render_monitor);
-	ctx.listen_wrapper(&output.events.destroy, &mon.destroy, cleanup_monitor);
-	ctx.listen_wrapper(&output.events.request_state, &mon.request_state, request_monitor_state);
+	ctx.listenWrapper(&output.events.frame, &mon.frame, renderMonitor);
+	ctx.listenWrapper(&output.events.destroy, &mon.destroy, cleanupMonitor);
+	ctx.listenWrapper(&output.events.request_state, &mon.request_state, requestMonitorState);
 
 	c.wlr_output_state_set_enabled(&state, 1);
 	c.wlr_output_commit_state(output, &state);
@@ -121,17 +125,18 @@ fn create_monitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	else
 		c.wlr_output_layout_add(ctx.output_layout, output, mon.monitor.x, mon.monitor.y);
 }
-fn create_notify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn createNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
 }
-fn create_popup(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn createPopup(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
 }
-fn destroy_layer_surface_notify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn destroyLayerSurfaceNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
 }
-fn gpu_reset(_: ?*c.struct_wl_listener, _: ?*anyopaque) void {
-	const old_renderer, const old_alloc = .{ renderer, alloc };
+fn gpuReset(_: ?*c.wl_listener, _: ?*anyopaque) void {
+	const old_renderer = renderer;
+	const old_alloc = alloc;
 	defer {
 		c.wlr_allocator_destroy(old_alloc);
 		c.wlr_renderer_destroy(old_renderer);
@@ -139,12 +144,11 @@ fn gpu_reset(_: ?*c.struct_wl_listener, _: ?*anyopaque) void {
 
 	renderer = c.wlr_renderer_autocreate(backend) orelse {
 		log.errln("wlroots: Failed to create renderer!", .{});
-		return Generic;
+		return E;
 	};
-
 	alloc = c.wlr_allocator_autocreate(backend, renderer) orelse {
 		log.errln("wlroots: Failed to create allocator!", .{});
-		return Generic;
+		return E;
 	};
 
 	c.wl_list_remove(&gpu_reset.link);
@@ -157,8 +161,8 @@ fn gpu_reset(_: ?*c.struct_wl_listener, _: ?*anyopaque) void {
 	while (&m.link != &monitors) : (m = c.wl_container_of(m.link.next, m, "link"))
 		c.wlr_output_init_render(m.output, alloc, renderer);
 }
-fn power_mgr_set_mode(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const event: *c.struct_wlr_output_power_v1_set_mode_event = @ptrCast(data);
+fn powerMgrSetMode(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	const event: *c.wlr_output_power_v1_set_mode_event = @ptrCast(data);
 	const state: c.wlr_output_state = undefined;
 	@memset(state, 0);
 
@@ -169,21 +173,21 @@ fn power_mgr_set_mode(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	c.wlr_output_commit_state(mon.output, &state);
 
 	mon.asleep = !event.mode;
-	update_monitors(null, null);
+	updateMonitors(null, null);
 }
-fn render_monitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn renderMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
 }
-fn request_monitor_state(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn requestMonitorState(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
 }
-fn unmap_layer_surface_notify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn unmapLayerSurfaceNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
 }
-fn update_monitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const config: *c.struct_wlr_output_configuration_v1 =
+fn updateMonitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	const config: *c.wlr_output_configuration_v1 =
 		c.wlr_output_configuration_v1_create();
-	var config_head: *c.struct_wlr_output_configuration_head_v1 = undefined;
+	var config_head: *c.wlr_output_configuration_head_v1 = undefined;
 
 	var m: *Monitor = undefined;
 	m = // TODO
@@ -191,11 +195,11 @@ fn update_monitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
 fn urgent(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	const event: *c.wlr_xdg_activation_v1_request_activate_event = @ptrCast(data.?);
 	const client: ?*Client = null;
-	toplevel_from_wlr_surface(event.surface, &client, null);
+	toplevelFromWlrSurface(event.surface, &client, null);
 	if (client == null or c == selmon.topmost_client()) return;
 
 	client.is_urgent = true;
 
 	if (client.get_surface().mapped)
-		client.set_border_color(constants.config.urgentcolor);
+		client.set_border_color(constants.config.urgent_color);
 }
