@@ -1,6 +1,9 @@
 // TODO FINAL FIX pub and private fn decls
+// TODO FINAL FIX inline and not-inline fn decls
 
 const config = @import("config");
+const std = @import("std");
+const linux = std.os.linux; // TODO CONSIDER
 const c = @import("c.zig").c;
 const ctx = @import("globals.zig");
 
@@ -145,10 +148,11 @@ inline fn setBounds(self: *const Self, w: i32, h: i32) u32 {
 	return c.wlr_xdg_toplevel_set_bounds(self.surface.xdg.unnamed_0.toplevel, w, h);
 }
 
-inline fn getAppId(self: *const Self) *const c_char {
+inline fn getAppId(self: *const Self) [*]const u8 {
+	const broken: [*]const u8 = "broken";
 	if (config.xwayland and self.surface == .xwayland)
-		return if (self.surface.xwayland.class) |cls| cls else "broken";
-	return self.surface.xdg.unnamed_0 // TODO NOW NOW dwl.c/client_get_appid
+		return if (self.surface.xwayland.class) |cls| cls else broken;
+	return if (self.surface.xdg.unnamed_0.toplevel.*.app_id) |appid| appid else broken;
 }
 
 inline fn getClip(self: *const Self) c.wlr_box {
@@ -164,15 +168,116 @@ inline fn getClip(self: *const Self) c.wlr_box {
 	return result;
 }
 
+inline fn getGeometry(self: *const Self) c.wlr_box {
+	if (config.xwayland and self.surface == .xwayland) {
+		const xw = &self.surface.xwayland;
+		return .{
+			.x = xw.x, .y = xw.y,
+			.width = xw.width, .height = xw.height
+		};
+	}
+	return self.surface.xdg.geometry;
+}
+
+inline fn getParent(self: *const Self) ?*Self {
+	var result: ?*Self = null;
+	if (config.xwayland and self.surface == .xwayland) {
+		if (self.surface.xwayland.parent != null)
+			_ = toplevelFromWlrSurface(self.surface.xwayland.parent.surface,
+				&result, null);
+		return result;
+	}
+	if (self.surface.xdg.unnamed_0.toplevel.*.parent)
+		_ = toplevelFromWlrSurface(
+			self.surface.xdg.unnamed_0.toplevel.*.parent.*.base.*.surface,
+			&result, null);
+	return result;
+}
+
+inline fn hasChildren(self: *const Self) bool {
+	if (config.xwayland and self.surface == .xwayland)
+		return !c.wl_list_empty(&self.surface.xwayland.children);
+	// `surface.xdg->link` is never empty because it always contains at least the
+	// surface itself.
+	return c.wl_list_length(&self.surface.xdg.link) > 1;
+}
+
+inline fn getTitle(self: *const Self) [*]const u8 {
+	const broken = "broken";
+	if (config.xwayland and self.surface == .xwayland)
+		return if (self.surface.xwayland.title) |title| title else broken;
+	return if (self.surface.xdg.unnamed_0.toplevel.*.title) |title| title else broken;
+}
+
+inline fn isFloatType(self: *const Self) bool {
+	if (config.xwayland and self.surface == .xwayland) {
+		const surface: *const c.wlr_xwayland_surface = self.surface.xwayland;
+		const hints: *const c.xcb_size_hints_t = surface.size_hints;
+		if (surface.modal) return true;
+
+		for (&.{
+			c.WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DIALOG,
+			c.wLR_XWAYLAND_NET_WM_WINDOW_TYPE_SPLASH,
+			c.wLR_XWAYLAND_NET_WM_WINDOW_TYPE_TOOLBAR,
+			c.wLR_XWAYLAND_NET_WM_WINDOW_TYPE_UTILITY
+		}) |kind| if (c.wlr_xwayland_surface_has_window_type(surface, kind)) return 1;
+
+		const hints_initialized = hints != null and hints.?.min_width > 0 and hints.?.max_height > 0;
+		return hints_initialized and
+			(hints.max_width == hints.min_width or hints.max_height == hints.min_height);
+	}
+
+	const toplevel = self.surface.xdg.unnamed_0.toplevel;
+	const state = toplevel.*.current;
+
+	const toplevel_has_parent = toplevel.*.parent != null;
+	const state_has_min_side = state.min_width != 0 and state.min_width != 0;
+	return toplevel_has_parent or (state_has_min_side and
+		(state.min_width == state.max_width or state.min_height == state.max_height));
+}
+
+inline fn isOnMonitor(self: *const Self, monitor: *const Monitor) bool {
+	// TODO
+	_ = self;
+	_ = monitor;
+}
+
+inline fn isStopped(self: *const Self) bool {
+	if (config.xwayland and self.surface == .xwayland) return false;
+
+	var pid: c_int = undefined;
+	var in = std.mem.zeroes(linux.siginfo_t);
+	const flag = linux.W.NOHANG | linux.W.CONTINUED | linux.W.STOPPED | linux.W.NOWAIT;
+	c.wl_client_get_credentials(self.surface.xdg.client, &pid, null, null);
+	if (linux.waitpid(linux.P.PID, pid, &in, flag) < 0) {
+		// This process is not our child process, while is very unlikely that
+		// it is stopped, in order to do not skip frames, assume that it is.
+		const errno = std.posix.errno(-1);
+		if (errno == .ECHILD) return true;
+	}
+	else if (in.si_pid and
+		(in.si_code == linux.W.STOPPED or in.si_code == linux.W.TRAPPED)) return true;
+
+	return false;
+}
+
+inline fn isUnmanaged(self: *const Self) bool {
+	return if (config.xwayland and self.surface == .xwayland)
+		self.surface.xwayland.override_redirect
+		else false;
+}
+
+// TODO
+
 pub fn visibleOn(self: *const Self, mon: ?*const Monitor) bool {
 	return mon != null and self.mon == mon and
 		(self.tags & mon.?.tagset[mon.?.seltags]) == 1;
 }
 
 pub fn resize(self: *const Self, geom: c.wlr_box, interact: bool) void {
-	const mapped = switch (self.surface) {
-		.xdg => |surf| surf.mapped,
-		.xwayland => |surf| surf.mapped
+	const mapped: bool = switch (self.surface) {
+		.xdg => |surf| surf.surface.*.mapped,
+		.xwayland => |surf| surf.surface.*.mapped
 	};
 	if (self.mon == null or !mapped) return;
 

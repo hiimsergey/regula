@@ -275,7 +275,7 @@ fn urgent(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	client.is_urgent = true;
 
 	if (switch (client.?.surface) {
-		.xdg => |surf| surf.mapped,
-		.xwayland => |surf| surf.mapped
+		.xdg => |surf| surf.surface.*.mapped,
+		.xwayland => |surf| surf.surface.*.mapped
 	}) client.setBorderColor(userconfig.urgent_color);
 }

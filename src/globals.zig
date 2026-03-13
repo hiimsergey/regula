@@ -126,7 +126,7 @@ pub fn init() !void {
 		.mask = linux.sigemptyset()
 	};
 
-	inline for ([_]comptime_int{
+	inline for (&.{
 		linux.SIG.CHLD,
 		linux.SIG.INT,
 		linux.SIG.TERM,

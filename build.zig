@@ -26,11 +26,9 @@ pub fn build(b: *Build) void {
 	exe.root_module.linkSystemLibrary("wayland-server", .{});
 	exe.root_module.linkSystemLibrary("xkbcommon", .{});
 	exe.root_module.linkSystemLibrary("input", .{});
-
-	// Run command
-	const run_exe = b.addRunArtifact(exe);
-	const run_step = b.step("run", "Run the program");
-	run_step.dependOn(&run_exe.step);
+	// XWayland
+	exe.root_module.linkSystemLibrary("xcb", .{});
+	exe.root_module.linkSystemLibrary("xcb-icccm", .{});
 
 	// User-defined options
 	const xwayland = b.option(
@@ -42,6 +40,11 @@ pub fn build(b: *Build) void {
 	options.addOption(bool, "xwayland", xwayland);
 
 	exe.root_module.addOptions("config", options);
+
+	// Run command
+	const run_exe = b.addRunArtifact(exe);
+	const run_step = b.step("run", "Run the program");
+	run_step.dependOn(&run_exe.step);
 
 	// Actual installation
 	b.installArtifact(exe);

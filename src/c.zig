@@ -60,6 +60,7 @@ pub const c = @cImport({
 
 	if (config.xwayland) {
 		@cInclude("wlr/xwayland.h");
+		@cInclude("wlr/xwayland/shell.h"); // TODO CONSIDER
 		@cInclude("xcb/xcb.h");
 		@cInclude("xcb/xcb_icccm.h");
 	}
