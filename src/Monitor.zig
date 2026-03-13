@@ -38,11 +38,25 @@ pub const Rule = struct {
 	y: i32
 };
 
+pub const rules = [_]Rule{
+	.{
+		.name = null,
+		.mfact = 0.55,
+		.n_master = 1,
+		.scale = 1,
+		.layout = &Layout.layouts[0],
+		.rr = c.WL_OUTPUT_TRANSFORM_NORMAL,
+		.x = -1, .y = -1
+	}
+};
+
 fn topmostClient(self: *Self) ?*Client {
 	var cl: *Client = undefined;
 	cl = c.wl_container_of(ctx.fstack.next, cl, "flink");
 	while (&cl.flink != &ctx.fstack) :
 		(cl = c.wl_container_of(cl.flink.next, cl, "flink"))
+	{
 		if (cl.visibleOn(self)) return cl;
+	}
 	return null;
 }

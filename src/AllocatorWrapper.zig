@@ -1,11 +1,10 @@
-//! Comptime wrapper that resolves to the slow but helpful `DebugAllocator` in
-//! Debug mode but a user-chosen one in all the other modes.
-
 const builtin = @import("builtin");
 const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 const DebugAllocator = std.heap.DebugAllocator(.{});
+/// Comptime wrapper that resolves to the slow but helpful `DebugAllocator` in
+/// Debug mode but a user-chosen one in all the other modes
 const Self = @This();
 
 dbg_state: if (is_debug) DebugAllocator else void,
@@ -14,16 +13,15 @@ const is_debug = builtin.mode == .Debug;
 
 /// Initialize Zig's `DebugAllocator`.
 pub fn init() Self {
-	return if (is_debug) .{ .dbg_state = DebugAllocator.init } else .{ .dbg_state = {} };
+	return .{ .dbg_state = if (is_debug) DebugAllocator.init else {} };
 }
 
-/// Return the `DebugAllocator`'s allocator.
+/// Return `DebugAllocator`'s allocator or `alt`, if not in Debug mode.
 pub fn allocator(self: *Self, alt: Allocator) Allocator {
 	return if (is_debug) self.dbg_state.allocator() else alt;
 }
 
-/// Deinit Zig's `DebugAllocator` and log an error message if
-/// the program contains Zig-side memory leaks.
+/// Deinit Zig's `DebugAllocator`, if necessary.
 pub fn deinit(self: *Self) void {
-	if (is_debug and self.dbg_state.deinit() == .leak) @panic("Leaks found!");
+	if (is_debug) _ = self.dbg_state.deinit();
 }

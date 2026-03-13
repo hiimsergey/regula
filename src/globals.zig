@@ -1,15 +1,13 @@
 const config = @import("config");
 const std = @import("std");
 const linux = std.os.linux;
+const log = std.log;
 const c = @import("c.zig").c;
-const constants = @import("constants.zig");
 const listeners = @import("listeners.zig");
-const log = @import("log.zig");
+const userconfig = @import("userconfig.zig");
 
 const AllocatorWrapper = @import("AllocatorWrapper.zig");
 const Client = @import("Client.zig");
-const E = error.Generic;
-const Layout = @import("Layout.zig");
 const Monitor = @import("Monitor.zig");
 
 pub const Layer = enum(u8) {
@@ -31,7 +29,21 @@ pub const Layer = enum(u8) {
 	};
 };
 
+// TODO CONSIDER MOVE
+const KeyboardGroup = struct {
+	interface: c.wlr_keyboard_group,
+
+	symbol_nr: c_int,
+	key_symbols: *const c.xkb_keysym_t,
+	mods: u32,
+
+	modifiersFn: c.wl_listener,
+	keyFn: c.wl_listener,
+	destroyFn: c.wl_listener
+};
+
 const LayerSurface = struct {
+	// TODO why
 	// NOTE must keep this field first
 	kind: c_uint,
 
@@ -44,42 +56,75 @@ const LayerSurface = struct {
 	layer_surface: *c.wlr_layer_surface_v1
 };
 
+const GrabClient = struct {
+	interface: *Client,
+	x: c_int,
+	y: c_int
+};
+
 pub var aw: AllocatorWrapper = undefined;
 pub var gpa: std.mem.Allocator = undefined;
 
-pub var activation: *c.wlr_xdg_activation_v1 = undefined;
-pub var alloc: *c.wlr_allocator = undefined;
-pub var backend: *c.wlr_backend = undefined;
-pub var compositor: *c.wlr_compositor = undefined;
+pub var child_pid: linux.pid_t = -1;
+pub var locked: c_int = undefined;
+pub var exclusive_focus: *anyopaque = undefined;
 pub var display: *c.wl_display = undefined;
-pub var drag_icon: *c.wlr_scene_tree = undefined;
 pub var event_loop: *c.wl_event_loop = undefined;
-pub var layers: [Layer.len]*c.wlr_scene_tree = undefined;
-pub var monitors: c.wl_list = undefined;
-pub var renderer: *c.wlr_renderer = undefined;
-pub var root_bg: *c.wlr_scene_rect = undefined;
+pub var backend: *c.wlr_backend = undefined;
 pub var scene: *c.wlr_scene = undefined;
+pub var layers: [Layer.len]*c.wlr_scene_tree = undefined;
+pub var drag_icon: *c.wlr_scene_tree = undefined;
+pub var renderer: *c.wlr_renderer = undefined;
+pub var alloc: *c.wlr_allocator = undefined;
+pub var compositor: *c.wlr_compositor = undefined;
 pub var session: *c.wlr_session = undefined;
 
-pub var output_layout: *c.wlr_output_layout = undefined;
-pub var sgeom: c.wlr_box = undefined;
-pub var selmon: ?*Monitor = undefined;
-
 pub var xdg_shell: *c.wlr_xdg_shell = undefined;
+pub var activation: *c.wlr_xdg_activation_v1 = undefined;
+pub var xdg_decoration_mgr: *c.wlr_xdg_decoration_manager_v1 = undefined;
 pub var clients: c.wl_list = undefined;
-pub var fstack: c.wl_list = undefined;
+pub var focus_stack: c.wl_list = undefined;
+pub var idle_notifier: *c.wlr_idle_notifier_v1 = undefined;
+pub var idle_inhibit_mgr: *c.wlr_idle_inhibit_manager_v1 = undefined;
 pub var layer_shell: *c.wlr_layer_shell_v1 = undefined;
-
+pub var output_mgr: *c.wlr_output_manager_v1 = undefined;
+pub var virtual_keyboard_mgr: *c.wlr_virtual_keyboard_manager_v1 = undefined;
+pub var virtual_pointer_mgr: *c.wlr_virtual_pointer_manager_v1 = undefined;
+pub var cursor_shape_mgr: *c.wlr_cursor_shape_manager_v1 = undefined;
 pub var power_mgr: *c.wlr_output_power_manager_v1 = undefined;
 
+pub var ptr_constraints: *c.wlr_pointer_constraints_v1 = undefined;
+pub var relative_ptr_mgr: *c.wlr_relative_pointer_manager_v1 = undefined;
+pub var active_constraint: *c.wlr_pointer_constraint_v1 = undefined;
+
+pub var cursor: *c.wlr_cursor = undefined;
+pub var cursor_mgr: *c.wlr_xcursor_manager = undefined;
+
+pub var root_bg: *c.wlr_scene_rect = undefined;
+pub var session_lock_mgr: *c.wlr_session_lock_manager_v1 = undefined;
+pub var locked_bg: *c.wlr_scene_rect = undefined;
+pub var cur_lock: *c.wlr_session_lock_v1 = undefined;
+
+pub var seat: *c.wlr_seat = undefined;
+pub var kb_group: KeyboardGroup = undefined;
+pub var cursor_mode: c_uint = undefined;
+pub var grab_client: *GrabClient = undefined;
+
+pub var output_layout: *c.wlr_output_layout = undefined;
+pub var screen_geom: c.wlr_box = undefined;
+pub var monitors: c.wl_list = undefined;
+pub var sel_monitor: ?*Monitor = undefined;
+
 pub fn init() !void {
+	aw = AllocatorWrapper.init();
+	gpa = aw.allocator(std.heap.c_allocator);
+
 	// Reset signal handlers for SIGCHLD, SIGINT, SIGTERM and SIGPIPE
 	const sa = linux.Sigaction{
 		.flags = linux.SA.RESTART,
 		.handler = .{ .handler = handlesig },
-		.mask = undefined
+		.mask = linux.sigemptyset()
 	};
-	_ = linux.sigemptyset();
 
 	inline for ([_]comptime_int{
 		linux.SIG.CHLD,
@@ -90,14 +135,14 @@ pub fn init() !void {
 
 	c.wlr_log_init(c.WLR_ERROR, null);
 
-	display = c.wl_display_create() orelse return E;
-	event_loop = c.wl_display_get_event_loop(display) orelse return E;
+	display = c.wl_display_create().?;
+	event_loop = c.wl_display_get_event_loop(display).?;
 	backend = c.wlr_backend_autocreate(event_loop, @ptrCast(&session)) orelse {
-		log.errln("wlroots: Failed to create backend!", .{});
-		return E;
+		log.err("wlroots: Failed to create backend!", .{});
+		return error.Generic;
 	};
 	scene = c.wlr_scene_create();
-	root_bg = c.wlr_scene_rect_create(&scene.tree, 0, 0, constants.config.root_color);
+	root_bg = c.wlr_scene_rect_create(&scene.tree, 0, 0, userconfig.root_color);
 
 	for (&layers) |*layer| layer.* = c.wlr_scene_tree_create(&scene.tree);
 	drag_icon = c.wlr_scene_tree_create(&scene.tree);
@@ -107,8 +152,8 @@ pub fn init() !void {
 	);
 
 	renderer = c.wlr_renderer_autocreate(backend) orelse {
-		log.errln("wlroots: Failed to create renderer!", .{});
-		return E;
+		log.err("wlroots: Failed to create renderer!", .{});
+		return error.Generic;
 	};
 	c.wl_signal_add(&renderer.events.lost, &listeners.gpu_reset);
 
@@ -125,8 +170,8 @@ pub fn init() !void {
 		c.wlr_linux_drm_syncobj_manager_v1_create(display, 1, drm);
 
 	alloc = c.wlr_allocator_autocreate(backend, renderer) orelse {
-		log.errln("wlroots: Failed to create allocator!", .{});
-		return E;
+		log.err("wlroots: Failed to create allocator!", .{});
+		return error.Generic;
 	};
 
 	compositor = c.wlr_compositor_create(display, 6, renderer);
@@ -162,7 +207,7 @@ pub fn init() !void {
 	c.wl_signal_add(&backend.events.new_output, &listeners.new_output);
 
 	c.wl_list_init(&clients);
-	c.wl_list_init(&fstack);
+	c.wl_list_init(&focus_stack);
 
 	xdg_shell = c.wlr_xdg_shell_create(display, 6);
 	c.wl_signal_add(&xdg_shell.events.new_toplevel, &listeners.new_xdg_toplevel);
@@ -172,23 +217,17 @@ pub fn init() !void {
 	c.wl_signal_add(&layer_shell.events.new_surface, &listeners.new_layer_surcace);
 }
 
-pub fn initAllocator() void {
-	aw = AllocatorWrapper.init();
-	gpa = aw.allocator(std.heap.c_allocator);
-}
-
 pub fn deinit() void {
 	aw.deinit();
 	// TODO CONSIDER freeing global stuff here
 }
 
 pub fn die(comptime fmt: []const u8, args: anytype) void {
-	log.errln(fmt, args);
+	log.err(fmt, args);
 	deinit();
 	std.process.exit(1);
 }
 
-// TODO FINAL CONSIDER REPLACE foo -> foo
 pub fn listenWrapper(
 	event: c.wl_signal,
 	listener: c.wl_listener,
@@ -201,73 +240,7 @@ pub fn listenWrapper(
 fn handlesig(signo: i32) callconv(.c) void {
 	var idc: u32 = undefined;
 	if (signo == linux.SIG.CHLD)
-		while (linux.waitpid(-1, &idc, linux.W.NOHANG) > 0) {} // TODO oh god
+		while (linux.waitpid(-1, &idc, linux.W.NOHANG) > 0) {}
 	else if (signo == linux.SIG.INT or signo == linux.SIG.TERM)
 		c.wl_display_terminate(display);
-}
-
-inline fn toplevelFromWlrSurface(
-	sur: ?*c.wlr_surface,
-	cl_ptr: ?**const Client,
-	lysur_ptr: ?**const LayerSurface
-) i32 {
-	var client_type = Client.Type.invalid;
-	var client: *Client = undefined;
-	var our_ls: *LayerSurface = undefined;
-
-	body: {
-		const root_surface: *c.wlr_surface =
-			c.wlr_surface_get_root_surface(sur orelse return -1);
-
-		if (config.xwayland) {
-			const xsurface: ?*c.wlr_xwayland_surface =
-				c.wlr_xwayland_surface_try_from_wlr_surface(root_surface);
-			if (@intFromPtr(xsurface) != 0) {
-				client = xsurface.data;
-				client_type = client.type;
-				break :body;
-			}
-		}
-
-		const layer_surface: ?*c.wlr_layer_surface_v1 =
-			c.wlr_layer_surface_v1_try_from_wlr_surface(root_surface);
-		if (@intFromPtr(layer_surface) != 0) {
-			our_ls = layer_surface.data;
-			client_type = .layer_shell;
-			break :body;
-		}
-
-		const xdg_surface: *c.wlr_xdg_surface =
-			c.wlr_xdg_surface_try_from_wlr_surface(root_surface);
-		while (xdg_surface) |xdgsur| {
-			var tmp_xdgsur: ?*c.wlr_xdg_surface = null;
-			switch (xdgsur.role) {
-				c.WLR_XDG_SURFACE_ROLE_POPUP => {
-					if (xdgsur.unnamed_0.popup == null or
-						xdgsur.unnamed_0.popup.*.parent == null)
-						return .invalid;
-
-					tmp_xdgsur =
-						c.wlr_xdg_surface_try_from_wlr_surface(xdgsur.unnamed_0.popup.*.parent)
-					orelse return toplevelFromWlrSurface(
-						xdgsur.unnamed_0.popup.*.parent,
-						cl_ptr, lysur_ptr
-					);
-
-					xdgsur = tmp_xdgsur;
-				},
-				c.WLR_XDG_SURFACE_ROLE_TOPLEVEL => {
-					client = @ptrCast(xdgsur.data);
-					client_type = client.kind;
-					break :body;
-				},
-				c.WLR_XDG_SURFACE_ROLE_NONE, _ => return .invalid
-			}
-		}
-	}
-
-	if (lysur_ptr) |pl| pl.* = our_ls;
-	if (cl_ptr) |pc| pc.* = client;
-
-	return @intFromEnum(client_type);
 }
