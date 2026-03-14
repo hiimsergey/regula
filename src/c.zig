@@ -59,8 +59,7 @@ pub const c = @cImport({
 	@cInclude("xkbcommon/xkbcommon.h");
 
 	if (config.xwayland) {
-		@cInclude("wlr/xwayland.h");
-		@cInclude("wlr/xwayland/shell.h"); // TODO CONSIDER
+		@cInclude("xwayland.h");
 		@cInclude("xcb/xcb.h");
 		@cInclude("xcb/xcb_icccm.h");
 	}

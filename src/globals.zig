@@ -142,7 +142,7 @@ pub fn init() !void {
 		return error.Generic;
 	};
 	scene = c.wlr_scene_create();
-	root_bg = c.wlr_scene_rect_create(&scene.tree, 0, 0, userconfig.root_color);
+	root_bg = c.wlr_scene_rect_create(&scene.tree, 0, 0, &userconfig.root_color);
 
 	for (&layers) |*layer| layer.* = c.wlr_scene_tree_create(&scene.tree);
 	drag_icon = c.wlr_scene_tree_create(&scene.tree);
@@ -155,7 +155,7 @@ pub fn init() !void {
 		log.err("wlroots: Failed to create renderer!", .{});
 		return error.Generic;
 	};
-	c.wl_signal_add(&renderer.events.lost, &listeners.gpu_reset);
+	c.wl_signal_add(&renderer.events.lost, &listeners.listeners.gpu_reset);
 
 	c.wlr_renderer_init_wl_shm(renderer, display);
 
@@ -222,10 +222,10 @@ pub fn deinit() void {
 	// TODO CONSIDER freeing global stuff here
 }
 
-pub fn die(comptime fmt: []const u8, args: anytype) void {
+pub fn die(comptime fmt: []const u8, args: anytype, comptime stat: u8) noreturn {
 	log.err(fmt, args);
 	deinit();
-	std.process.exit(1);
+	std.process.exit(stat);
 }
 
 pub fn listenWrapper(

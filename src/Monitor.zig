@@ -50,7 +50,15 @@ pub const rules = [_]Rule{
 	}
 };
 
-fn topmostClient(self: *Self) ?*Client {
+pub fn focusTop(self: *const Self) ?*const Client {
+	const client: *const Client = undefined;
+	_ = client; // TODO
+	_ = self; // TODO
+	// TODO wl_list_for_each
+	return null;
+}
+
+fn topmostClient(self: *const Self) ?*Client {
 	var cl: *Client = undefined;
 	cl = c.wl_container_of(ctx.fstack.next, cl, "flink");
 	while (&cl.flink != &ctx.fstack) :

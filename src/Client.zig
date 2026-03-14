@@ -56,6 +56,13 @@ xwayland: if (config.xwayland) struct {
 	set_hints: c.wlr_listener,
 } else void,
 
+pub fn focus(self: *const Self, list: c_int) void {
+	// TODO CONSIDER change returntype
+	// TODO
+	_ = self;
+	_ = list;
+}
+
 pub inline fn toplevelFromWlrSurface(
 	sur: ?*c.wlr_surface,
 	cl_ptr: ?**const Self,
@@ -267,7 +274,7 @@ inline fn isUnmanaged(self: *const Self) bool {
 		else false;
 }
 
-// TODO
+// TODO NOW NOW
 
 pub fn visibleOn(self: *const Self, mon: ?*const Monitor) bool {
 	return mon != null and self.mon == mon and

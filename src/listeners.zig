@@ -5,18 +5,80 @@ const c = @import("c.zig").c;
 const ctx = @import("globals.zig");
 const userconfig = @import("userconfig.zig");
 
+const StructField = std.builtin.Type.StructField;
 const Client = @import("Client.zig");
 const LayerSurface = @import("LayerSurface.zig");
 const Monitor = @import("Monitor.zig");
 
-const gpu_reset = c.wl_listener{ .notify = gpuReset };
-const layout_change = c.wl_listener{ .notify = updateMonitors };
-const new_output = c.wl_listener{ .notify = createMonitor };
-const new_xdg_popup = c.wl_listener{ .notify = createPopup };
-const new_xdg_toplevel = c.wl_listener{ .notify = createNotify };
-const new_layer_surface = c.wl_listener{ .notify = createLayerSurface };
-const output_power_mgr_set_mode = c.wl_listener{ .notify = powerMgrSetMode };
-const request_activate = c.wl_listener{ .notify = urgent };
+const ListenerList: type = T: {
+	var fields: [list.kvs.len]StructField = undefined;
+
+	for (list.keys(), &fields) |name, *field| {
+		field.* = StructField{
+			.name = name,
+			.type = c.wl_listener,
+			.alignment = @alignOf(c.wl_listener),
+			.default_value_ptr = null,
+			.is_comptime = true
+		};
+	}
+
+	break :T @Type(.{ .@"struct" = .{
+		.fields = fields,
+		.decls = &.{},
+		.layout = .auto,
+		.is_tuple = false
+	} });
+};
+
+pub const listeners: ListenerList = listeners: {
+	var result: ListenerList = undefined;
+	for (@typeInfo(ListenerList).@"struct".fields) |field| {
+		const listener = c.wl_listener{ .notify = list.get(field.name).? };
+		@field(result, field.name) = listener;
+	}
+	break :listeners result;
+};
+
+const list = std.StaticStringMap(c.wl_notify_func_t).initComptime(slice: {
+	var slice = .{
+		.{ "cursor_axis",               &axisNotify              },
+		.{ "cursor_button",             &buttonPress             },
+		.{ "cursor_frame",              &cursorFrame             },
+		.{ "cursor_motion",             &motionRelative          },
+		.{ "cursor_motion_absolute",    &motionAbsolute          },
+		.{ "gpu_reset",                 &gpuReset                },
+		.{ "layout_change",             &updateMonitors          },
+		.{ "new_idle_inhibitor",        &createIdleInhibitor     },
+		.{ "new_input_device",          &inputDevice             },
+		.{ "new_layer_surface",         &createLayerSurface      },
+		.{ "new_output",                &createMonitor           },
+		.{ "new_pointer_constraint",    &createPointerConstraint },
+		.{ "new_session_lock",          &lockSession             },
+		.{ "new_virtual_keyboard",      &virtualKeyboard         },
+		.{ "new_virtual_pointer",       &virtualPointer          },
+		.{ "new_xdg_decoration",        &createDecoration        },
+		.{ "new_xdg_popup",             &createPopup             },
+		.{ "new_xdg_toplevel",          &createNotify            },
+		.{ "output_mgr_apply",          &outputMgrApply          },
+		.{ "output_mgr_test",           &outputMgrTest           },
+		.{ "output_power_mgr_set_mode", &powerMgrSetMode         },
+		.{ "request_activate",          &urgent                  },
+		.{ "request_cursor",            &setCursor               },
+		.{ "request_set_cursor_shape",  &setCursorShape          },
+		.{ "request_set_psel",          &setPSel                 }, // TODO RENAME
+		.{ "request_set_sel",           &setSel                  }, // TODO RENAME
+		.{ "request_start_drag",        &requestStartDrag        },
+		.{ "start_drag",                &startDrag               }
+	};
+	if (config.xwayland) {
+		slice = slice ++ .{
+			"new_xwayland_surface",    &createNotifyX11,
+			"xwayland_ready",          &xwaylandReady
+		};
+	}
+	break :slice slice;
+});
 
 // TODO CONSIDER USE in ctx.deinit()
 fn cleanup() void {
@@ -40,22 +102,162 @@ fn cleanup() void {
 	// Destroy it until it's fixed on the wlroots side.
 	c.wlr_backend_destroy(ctx.backend);
 
-	c.wl_display_destroy(dpy);
+	c.wl_display_destroy(ctx.display);
 	// Destroy after the wayland display (when the monitors are already destroyed)
 	// to avoid destroying them with an invalid scene output.
 	c.wlr_scene_node_destroy(&ctx.scene.tree.node);
 }
 
+fn cleanupListeners() void {
+	for (@typeInfo(ListenerList).@"struct".fields) |field| {
+		const listener: c.wl_listener = &@field(listeners, field.name);
+		c.wl_list_remove(&listener.link);
+	}
+	if (config.xwayland) {
+		c.wl_list_remove(&listeners.new_xwayland_surface.link);
+		c.wl_list_remove(&listeners.xwayland_ready.link);
+	}
+}
+
 fn cleanupMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
+	_ = data;
 }
 
 fn commitLayerSurfaceNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
+	_ = data;
+}
+
+fn destroyLayerSurfaceNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn renderMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn requestMonitorState(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn unmapLayerSurfaceNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+// Listeners;
+
+fn axisNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn buttonPress(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn cursorFrame(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn motionRelative(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn motionAbsolute(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn gpuReset(_: ?*c.wl_listener, _: ?*anyopaque) void {
+	const old_renderer = ctx.renderer;
+	const old_alloc = ctx.alloc;
+	defer {
+		c.wlr_allocator_destroy(old_alloc);
+		c.wlr_renderer_destroy(old_renderer);
+	}
+
+	ctx.renderer = c.wlr_renderer_autocreate(ctx.backend) orelse
+		ctx.die("wlroots: Failed to create renderer!", .{}, 1);
+	ctx.alloc = c.wlr_allocator_autocreate(ctx.backend, ctx.renderer) orelse
+		ctx.die("wlroots: Failed to create allocator!", .{}, 1);
+
+	c.wl_list_remove(&listeners.gpu_reset.link);
+	c.wl_signal_add(&ctx.renderer.events.lost, &listeners.gpu_reset);
+
+	c.wlr_compositor_set_renderer(ctx.compositor, ctx.renderer);
+
+	var m: *Monitor = undefined;
+	m = c.wl_container_of(ctx.monitors.next, m, "link");
+	while (&m.link != &ctx.monitors) : (m = c.wl_container_of(m.link.next, m, "link"))
+		c.wlr_output_init_render(m.output, ctx.alloc, ctx.renderer);
+}
+
+fn updateMonitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	const output_config: *c.wlr_output_configuration_v1 =
+		c.wlr_output_configuration_v1_create().?;
+	const config_head: *c.wlr_output_configuration_head_v1 = undefined; // TODO make var
+	_ = config_head; // TODO
+	_ = data ; // TODO
+
+	var m: *Monitor = undefined;
+	m = // TODO
+	// TODO HERE two wl_list_for_each macros
+	
+	// Now that we update the output layout, we can get its box.
+	c.wlr_output_layout_get_box(ctx.output_layout, null, &ctx.screen_geom);
+
+	c.wlr_scene_node_set_position(&ctx.root_bg.node,
+		ctx.screen_geom.x, ctx.screen_geom.y);
+	c.wlr_scene_rect_set_size(ctx.root_bg,
+		ctx.screen_geom.width, ctx.screen_geom.height);
+
+	// Ensures the clients are hidden when regula is locked.
+	c.wlr_scene_node_set_position(&ctx.locked_bg.node,
+		ctx.screen_geom.x, ctx.screen_geom.y);
+
+	// TODO wl_list_for_each
+
+	if (ctx.sel_monitor != null and ctx.sel_monitor.?.output.enabled) {
+		const selmon = ctx.sel_monitor.?;
+		// TODO wl_list_for_each
+		selmon.focusTop().?.focus(1);
+		if (selmon.lock_surface) {
+			Client.notifyEnter(selmon.lock_surface,
+				c.wlr_seat_get_keyboard(ctx.seat));
+			Client.activeSurface(selmon.lock_surface.surface, 1);
+		}
+	}
+
+	// TODO FOREIGN figure out why the cursor image is at 0,0 after turning all
+	// the monitors on.
+	// Move the cursor image where it used to be. It does not generate a
+	// wl_pointer.motion event for the clients, it's only the image what it's
+	// at the wrong position after all.
+	c.wlr_cursor_move(ctx.cursor, null, 0, 0);
+
+	c.wlr_output_manager_v1_set_configuration(ctx.output_mgr, output_config);
+}
+
+fn createIdleInhibitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn inputDevice(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
 }
 
 fn createLayerSurface(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const layer_surface: *const c.wlr_layer_surface_v1 = @ptrCast(data);
+	const layer_surface: *const c.wlr_layer_surface_v1 = @alignCast(@ptrCast(data));
 	const surface: *const c.wlr_surface = layer_surface.surface;
 	const scene_layer: *const c.wlr_scene_tree =
 		ctx.layers[ctx.layer_map[layer_surface.pending.layer]];
@@ -68,8 +270,8 @@ fn createLayerSurface(_: ?*c.wl_listener, data: ?*anyopaque) void {
 		}
 	}
 
-	layer_surface.data = ctx.gpa.alloc(LayerSurface, 1)
-		catch ctx.die("Failed to allocate memory!", .{});
+	layer_surface.data = ctx.gpa.create(LayerSurface)
+		catch ctx.die("Failed to allocate memory!", .{}, 12);
 	var ls: *LayerSurface = layer_surface.data;
 	ls.kind = .layer_shell;
 
@@ -96,12 +298,12 @@ fn createLayerSurface(_: ?*c.wl_listener, data: ?*anyopaque) void {
 }
 
 fn createMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const output: *c.wlr_output = @ptrCast(data);
+	const output: *c.wlr_output = @alignCast(@ptrCast(data));
 
 	if (!c.wlr_output_init_render(output, ctx.alloc, ctx.renderer)) return;
 
-	var mon: *Monitor = ctx.gpa.alloc(Monitor, 1)
-		catch ctx.die("Failed to allocate memory!", .{});
+	var mon: *Monitor = ctx.gpa.create(Monitor)
+		catch ctx.die("Failed to allocate memory!", .{}, 12);
 	output.data = mon;
 	mon.output = output;
 
@@ -143,7 +345,7 @@ fn createMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	c.wlr_output_state_finish(&state);
 
 	// TODO CONSIDER REPLACE wl_list with ArrayList
-	c.wl_list_insert(&mons, &mon.link);
+	c.wl_list_insert(&ctx.monitors, &mon.link);
 
 	mon.fullscreen_bg = c.wlr_scene_rect_create(
 		ctx.layers[@intFromEnum(ctx.Layer.fs)],
@@ -154,49 +356,58 @@ fn createMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 
 	mon.scene_output = c.wlr_scene_output_create(ctx.scene, output);
 	if (mon.monitor.x == -1 and mon.monitor.y == -1)
-		c.wlr_output_layout_add_auto(ctx.output_layout, outputA)
+		c.wlr_output_layout_add_auto(ctx.output_layout, output)
 	else
 		c.wlr_output_layout_add(ctx.output_layout, output, mon.monitor.x, mon.monitor.y);
 }
 
-fn createNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn createPointerConstraint(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
+	_ = data;
+}
+
+fn lockSession(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn virtualKeyboard(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn virtualPointer(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn createDecoration(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
 }
 
 fn createPopup(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
+	_ = data;
 }
 
-fn destroyLayerSurfaceNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn createNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	// TODO
+	_ = data;
 }
 
-fn gpuReset(_: ?*c.wl_listener, _: ?*anyopaque) void {
-	const old_renderer = renderer;
-	const old_alloc = alloc;
-	defer {
-		c.wlr_allocator_destroy(old_alloc);
-		c.wlr_renderer_destroy(old_renderer);
-	}
+fn outputMgrApply(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
 
-	renderer = c.wlr_renderer_autocreate(backend) orelse
-		ctx.die("wlroots: Failed to create renderer!", .{});
-	alloc = c.wlr_allocator_autocreate(backend, renderer) orelse
-		ctx.die("wlroots: Failed to create allocator!", .{});
-
-	c.wl_list_remove(&gpu_reset.link);
-	c.wl_signal_add(&renderer.events.lost, &gpu_reset);
-
-	c.wlr_compositor_set_renderer(compositor, renderer);
-
-	var m: *Monitor = undefined;
-	m = c.wl_container_of(monitors.next, m, "link");
-	while (&m.link != &monitors) : (m = c.wl_container_of(m.link.next, m, "link"))
-		c.wlr_output_init_render(m.output, alloc, renderer);
+fn outputMgrTest(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
 }
 
 fn powerMgrSetMode(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const event: *c.wlr_output_power_v1_set_mode_event = @ptrCast(data);
+	const event: *c.wlr_output_power_v1_set_mode_event = @alignCast(@ptrCast(data));
 	const state: c.wlr_output_state = undefined;
 	@memset(state, 0);
 
@@ -210,67 +421,11 @@ fn powerMgrSetMode(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	updateMonitors(null, null);
 }
 
-fn renderMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	// TODO
-}
-
-fn requestMonitorState(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	// TODO
-}
-
-fn unmapLayerSurfaceNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	// TODO
-}
-
-fn updateMonitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const config: *c.wlr_output_configuration_v1 =
-		c.wlr_output_configuration_v1_create().?;
-	var config_head: *c.wlr_output_configuration_head_v1 = undefined;
-
-	var m: *Monitor = undefined;
-	m = // TODO
-	// TODO HERE two wl_list_for_each macros
-	
-	// Now that we update the output layout, we can get its box.
-	c.wlr_output_layout_get_box(ctx.output_layout, null, &ctx.screen_geom);
-
-	c.wlr_scene_node_set_position(&ctx.root_bg.node,
-		ctx.screen_geom.x, ctx.screen_geom.y);
-	c.wlr_scene_rect_set_size(ctx.root_bg,
-		ctx.screen_geom.width, ctx.screen_geom.height);
-
-	// Ensures the clients are hidden when regula is locked.
-	c.wlr_scene_node_set_position(&ctx.locked_bg.node,
-		ctx.screen_geom.x, ctx.screen_geom.y);
-
-	// TODO wl_list_for_each
-
-	if (ctx.sel_monitor != null and ctx.sel_monitor.?.output.enabled) {
-		const selmon = ctx.sel_monitor.?;
-		// TODO wl_list_for_each
-		focusClient(focusTop(selmon), 1);
-		if (selmon.lock_surface) {
-			Client.notifyEnter(selmon.lock_surface,
-				c.wlr_seat_get_keyboard(ctx.seat));
-			Client.activeSurface(selmon.lock_surface.surface, 1);
-		}
-	}
-
-	// TODO FOREIGN figure out why the cursor image is at 0,0 after turning all
-	// the monitors on.
-	// Move the cursor image where it used to be. It does not generate a
-	// wl_pointer.motion event for the clients, it's only the image what it's
-	// at the wrong position after all.
-	c.wlr_cursor_move(ctx.cursor, null, 0, 0);
-
-	c.wlr_output_manager_v1_set_configuration(ctx.output_mgr, config);
-}
-
 fn urgent(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const event: *c.wlr_xdg_activation_v1_request_activate_event = @ptrCast(data.?);
+	const event: *c.wlr_xdg_activation_v1_request_activate_event = @alignCast(@ptrCast(data));
 	const client: ?*Client = null;
 	_ = Client.toplevelFromWlrSurface(event.surface, &client, null);
-	if (client == null or c == ctx.sel_monitor.?.topmost_client()) return;
+	if (client == null or c == ctx.sel_monitor.?.topmostClient()) return;
 
 	client.is_urgent = true;
 
@@ -278,4 +433,44 @@ fn urgent(_: ?*c.wl_listener, data: ?*anyopaque) void {
 		.xdg => |surf| surf.surface.*.mapped,
 		.xwayland => |surf| surf.surface.*.mapped
 	}) client.setBorderColor(userconfig.urgent_color);
+}
+
+fn setCursor(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn setCursorShape(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn setPSel(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn setSel(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn requestStartDrag(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn startDrag(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn createNotifyX11(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
+}
+
+fn xwaylandReady(_: ?*c.wl_listener, data: ?*anyopaque) void {
+	// TODO
+	_ = data;
 }

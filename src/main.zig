@@ -64,6 +64,8 @@ fn handleArgs() ?u8 {
 
 /// Single unbuffered print through stdout without formatting arguments
 fn stdoutPrint(comptime msg: []const u8) void {
-	const stdout_wrapper = std.fs.File.stdout().writer(&.{});
+	var stdout_wrapper = std.fs.File.stdout().writer(&.{});
 	stdout_wrapper.interface.print(msg, .{}) catch {};
 }
+
+// TODO FINAL ALL move variable declarations as close as possible to their use
