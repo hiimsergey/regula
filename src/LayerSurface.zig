@@ -12,6 +12,6 @@ scene_layer: *c.wlr_scene_layer_surface_v1,
 link: c.wl_list,
 mapped: bool,
 layer_surface: *c.wlr_layer_surface_v1,
-destroy: c.wlr_listener,
-unmap: c.wlr_listener,
-surface_commit: c.wlr_listener
+destroy: c.wl_listener,
+unmap: c.wl_listener,
+surface_commit: c.wl_listener

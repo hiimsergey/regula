@@ -20,13 +20,14 @@ pub const Layer = enum(u8) {
 	overlay,
 	block,
 
-	const len = @typeInfo(Layer).@"enum".fields.len;
-	const map = [_]u8{
+	pub const map = [_]u8{
 		@intFromEnum(Layer.background),
 		@intFromEnum(Layer.bottom),
 		@intFromEnum(Layer.top),
 		@intFromEnum(Layer.overlay)
 	};
+
+	const len = @typeInfo(Layer).@"enum".fields.len;
 };
 
 // TODO CONSIDER MOVE
@@ -39,7 +40,11 @@ const KeyboardGroup = struct {
 
 	modifiersFn: c.wl_listener,
 	keyFn: c.wl_listener,
-	destroyFn: c.wl_listener
+	destroyFn: c.wl_listener,
+
+	fn destroy(_: ?*c.wl_listener, _: ?*anyopaque) void {
+		// TODO
+	}
 };
 
 const LayerSurface = struct {
@@ -115,6 +120,8 @@ pub var screen_geom: c.wlr_box = undefined;
 pub var monitors: c.wl_list = undefined;
 pub var sel_monitor: ?*Monitor = undefined;
 
+pub var xwayland: if (config.xwayland) [*c]c.wlr_xwayland else void = undefined;
+
 pub fn init() !void {
 	aw = AllocatorWrapper.init();
 	gpa = aw.allocator(std.heap.c_allocator);
@@ -155,7 +162,7 @@ pub fn init() !void {
 		log.err("wlroots: Failed to create renderer!", .{});
 		return error.Generic;
 	};
-	c.wl_signal_add(&renderer.events.lost, &listeners.listeners.gpu_reset);
+	c.wl_signal_add(&renderer.events.lost, &listeners.items.gpu_reset);
 
 	c.wlr_renderer_init_wl_shm(renderer, display);
 
@@ -196,30 +203,54 @@ pub fn init() !void {
 	);
 
 	power_mgr = c.wlr_output_power_manager_v1_create(display);
-	c.wl_signal_add(&power_mgr.events.set_mode, &listeners.output_power_mgr_set_node);
+	c.wl_signal_add(&power_mgr.events.set_mode, &listeners.items.output_power_mgr_set_node);
 
 	output_layout = c.wlr_output_layout_create(display);
-	c.wl_signal_add(&output_layout.events.change, &listeners.layout_change);
+	c.wl_signal_add(&output_layout.events.change, &listeners.items.layout_change);
 
 	c.wlr_xdg_output_manager_v1_create(display, output_layout);
 
 	c.wl_list_init(&monitors);
-	c.wl_signal_add(&backend.events.new_output, &listeners.new_output);
+	c.wl_signal_add(&backend.events.new_output, &listeners.items.new_output);
 
 	c.wl_list_init(&clients);
 	c.wl_list_init(&focus_stack);
 
 	xdg_shell = c.wlr_xdg_shell_create(display, 6);
-	c.wl_signal_add(&xdg_shell.events.new_toplevel, &listeners.new_xdg_toplevel);
-	c.wl_signal_add(&xdg_shell.events.new_popup, &listeners.new_xdg_popup);
+	c.wl_signal_add(&xdg_shell.events.new_toplevel, &listeners.items.new_xdg_toplevel);
+	c.wl_signal_add(&xdg_shell.events.new_popup, &listeners.items.new_xdg_popup);
 
 	layer_shell = c.wlr_layer_shell_v1_create(display, 3);
-	c.wl_signal_add(&layer_shell.events.new_surface, &listeners.new_layer_surcace);
+	c.wl_signal_add(&layer_shell.events.new_surface, &listeners.items.new_layer_surcace);
 }
 
 pub fn deinit() void {
 	aw.deinit();
-	// TODO CONSIDER freeing global stuff here
+
+	listeners.cleanup();
+	if (config.xwayland) {
+		c.wlr_xwayland_destroy(xwayland);
+		xwayland = null;
+	}
+
+	c.wl_display_destroy_clients(display);
+	if (child_pid > 0) {
+		var idc: u32 = undefined;
+		_ = linux.kill(-child_pid, linux.SIG.TERM);
+		_ = linux.waitpid(child_pid, &idc, 0);
+	}
+	c.wlr_xcursor_manager_destroy(cursor_mgr);
+
+	KeyboardGroup.destroy(&kb_group.destroyFn, null);
+
+	// If it's not destroyed manually, it will cause a use-after-free of wlr_seat.
+	// Destroy it until it's fixed on the wlroots side.
+	c.wlr_backend_destroy(backend);
+
+	c.wl_display_destroy(display);
+	// Destroy after the wayland display (when the monitors are already destroyed)
+	// to avoid destroying them with an invalid scene output.
+	c.wlr_scene_node_destroy(&scene.tree.node);
 }
 
 pub fn die(comptime fmt: []const u8, args: anytype, comptime stat: u8) noreturn {

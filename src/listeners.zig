@@ -8,6 +8,7 @@ const userconfig = @import("userconfig.zig");
 const StructField = std.builtin.Type.StructField;
 const Client = @import("Client.zig");
 const LayerSurface = @import("LayerSurface.zig");
+const Layout = @import("Layout.zig");
 const Monitor = @import("Monitor.zig");
 
 const ListenerList: type = T: {
@@ -31,7 +32,7 @@ const ListenerList: type = T: {
 	} });
 };
 
-pub const listeners: ListenerList = listeners: {
+pub const items: ListenerList = listeners: {
 	var result: ListenerList = undefined;
 	for (@typeInfo(ListenerList).@"struct".fields) |field| {
 		const listener = c.wl_listener{ .notify = list.get(field.name).? };
@@ -40,82 +41,48 @@ pub const listeners: ListenerList = listeners: {
 	break :listeners result;
 };
 
-const list = std.StaticStringMap(c.wl_notify_func_t).initComptime(slice: {
-	var slice = .{
-		.{ "cursor_axis",               &axisNotify              },
-		.{ "cursor_button",             &buttonPress             },
-		.{ "cursor_frame",              &cursorFrame             },
-		.{ "cursor_motion",             &motionRelative          },
-		.{ "cursor_motion_absolute",    &motionAbsolute          },
-		.{ "gpu_reset",                 &gpuReset                },
-		.{ "layout_change",             &updateMonitors          },
-		.{ "new_idle_inhibitor",        &createIdleInhibitor     },
-		.{ "new_input_device",          &inputDevice             },
-		.{ "new_layer_surface",         &createLayerSurface      },
-		.{ "new_output",                &createMonitor           },
-		.{ "new_pointer_constraint",    &createPointerConstraint },
-		.{ "new_session_lock",          &lockSession             },
-		.{ "new_virtual_keyboard",      &virtualKeyboard         },
-		.{ "new_virtual_pointer",       &virtualPointer          },
-		.{ "new_xdg_decoration",        &createDecoration        },
-		.{ "new_xdg_popup",             &createPopup             },
-		.{ "new_xdg_toplevel",          &createNotify            },
-		.{ "output_mgr_apply",          &outputMgrApply          },
-		.{ "output_mgr_test",           &outputMgrTest           },
-		.{ "output_power_mgr_set_mode", &powerMgrSetMode         },
-		.{ "request_activate",          &urgent                  },
-		.{ "request_cursor",            &setCursor               },
-		.{ "request_set_cursor_shape",  &setCursorShape          },
-		.{ "request_set_psel",          &setPSel                 }, // TODO RENAME
-		.{ "request_set_sel",           &setSel                  }, // TODO RENAME
-		.{ "request_start_drag",        &requestStartDrag        },
-		.{ "start_drag",                &startDrag               }
-	};
-	if (config.xwayland) {
-		slice = slice ++ .{
-			"new_xwayland_surface",    &createNotifyX11,
-			"xwayland_ready",          &xwaylandReady
-		};
-	}
-	break :slice slice;
-});
+const list = std.StaticStringMap(c.wl_notify_func_t).initComptime(.{
+	.{ "cursor_axis",               &axisNotify              },
+	.{ "cursor_button",             &buttonPress             },
+	.{ "cursor_frame",              &cursorFrame             },
+	.{ "cursor_motion",             &motionRelative          },
+	.{ "cursor_motion_absolute",    &motionAbsolute          },
+	.{ "gpu_reset",                 &gpuReset                },
+	.{ "layout_change",             &updateMonitors          },
+	.{ "new_idle_inhibitor",        &createIdleInhibitor     },
+	.{ "new_input_device",          &inputDevice             },
+	.{ "new_layer_surface",         &createLayerSurface      },
+	.{ "new_output",                &createMonitor           },
+	.{ "new_pointer_constraint",    &createPointerConstraint },
+	.{ "new_session_lock",          &lockSession             },
+	.{ "new_virtual_keyboard",      &virtualKeyboard         },
+	.{ "new_virtual_pointer",       &virtualPointer          },
+	.{ "new_xdg_decoration",        &createDecoration        },
+	.{ "new_xdg_popup",             &createPopup             },
+	.{ "new_xdg_toplevel",          &createNotify            },
+	.{ "output_mgr_apply",          &outputMgrApply          },
+	.{ "output_mgr_test",           &outputMgrTest           },
+	.{ "output_power_mgr_set_mode", &powerMgrSetMode         },
+	.{ "request_activate",          &urgent                  },
+	.{ "request_cursor",            &setCursor               },
+	.{ "request_set_cursor_shape",  &setCursorShape          },
+	.{ "request_set_psel",          &setPSel                 }, // TODO RENAME
+	.{ "request_set_sel",           &setSel                  }, // TODO RENAME
+	.{ "request_start_drag",        &requestStartDrag        },
+	.{ "start_drag",                &startDrag               }
+} ++ if (config.xwayland) .{
+	"new_xwayland_surface",    &createNotifyX11,
+	"xwayland_ready",          &xwaylandReady
+} else .{});
 
-// TODO CONSIDER USE in ctx.deinit()
-fn cleanup() void {
-	cleanupListeners();
-	if (config.xwayland) {
-		c.wlr_xwayland_destroy(ctx.xwayland);
-		ctx.xwayland = null;
-	}
-
-	c.wl_display_destroy_clients(ctx.display);
-	if (ctx.child_pid > 0) {
-		var idc: u32 = undefined;
-		linux.kill(-ctx.child_pid, linux.SIG.TERM);
-		linux.waitpid(ctx.child_pid, &idc, 0);
-	}
-	c.wlr_xcursor_manager_destroy(ctx.cursor_mgr);
-
-	c.destroyKeyboardGroup(&ctx.kb_group.destroyFn, null);
-
-	// If it's not destroyed manually, it will cause a use-after-free of wlr_seat.
-	// Destroy it until it's fixed on the wlroots side.
-	c.wlr_backend_destroy(ctx.backend);
-
-	c.wl_display_destroy(ctx.display);
-	// Destroy after the wayland display (when the monitors are already destroyed)
-	// to avoid destroying them with an invalid scene output.
-	c.wlr_scene_node_destroy(&ctx.scene.tree.node);
-}
-
-fn cleanupListeners() void {
+pub fn cleanup() void {
 	for (@typeInfo(ListenerList).@"struct".fields) |field| {
-		const listener: c.wl_listener = &@field(listeners, field.name);
+		const listener: c.wl_listener = &@field(items, field.name);
 		c.wl_list_remove(&listener.link);
 	}
 	if (config.xwayland) {
-		c.wl_list_remove(&listeners.new_xwayland_surface.link);
-		c.wl_list_remove(&listeners.xwayland_ready.link);
+		c.wl_list_remove(&items.new_xwayland_surface.link);
+		c.wl_list_remove(&items.xwayland_ready.link);
 	}
 }
 
@@ -189,8 +156,8 @@ fn gpuReset(_: ?*c.wl_listener, _: ?*anyopaque) void {
 	ctx.alloc = c.wlr_allocator_autocreate(ctx.backend, ctx.renderer) orelse
 		ctx.die("wlroots: Failed to create allocator!", .{}, 1);
 
-	c.wl_list_remove(&listeners.gpu_reset.link);
-	c.wl_signal_add(&ctx.renderer.events.lost, &listeners.gpu_reset);
+	c.wl_list_remove(&items.gpu_reset.link);
+	c.wl_signal_add(&ctx.renderer.events.lost, &items.gpu_reset);
 
 	c.wlr_compositor_set_renderer(ctx.compositor, ctx.renderer);
 
@@ -207,8 +174,9 @@ fn updateMonitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	_ = config_head; // TODO
 	_ = data ; // TODO
 
-	var m: *Monitor = undefined;
-	m = // TODO
+	const m: *Monitor = undefined; // TODO make var
+	_ = m;
+	// TODO NOW
 	// TODO HERE two wl_list_for_each macros
 	
 	// Now that we update the output layout, we can get its box.
@@ -229,10 +197,10 @@ fn updateMonitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
 		const selmon = ctx.sel_monitor.?;
 		// TODO wl_list_for_each
 		selmon.focusTop().?.focus(1);
-		if (selmon.lock_surface) {
-			Client.notifyEnter(selmon.lock_surface,
-				c.wlr_seat_get_keyboard(ctx.seat));
-			Client.activeSurface(selmon.lock_surface.surface, 1);
+
+		if (selmon.lock_surface) |locksurf| {
+			Client.notifyEnter(locksurf, c.wlr_seat_get_keyboard(ctx.seat));
+			Client.activeSurface(locksurf.surface, 1);
 		}
 	}
 
@@ -257,12 +225,12 @@ fn inputDevice(_: ?*c.wl_listener, data: ?*anyopaque) void {
 }
 
 fn createLayerSurface(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const layer_surface: *const c.wlr_layer_surface_v1 = @alignCast(@ptrCast(data));
+	const layer_surface: *c.wlr_layer_surface_v1 = @alignCast(@ptrCast(data.?));
 	const surface: *const c.wlr_surface = layer_surface.surface;
 	const scene_layer: *const c.wlr_scene_tree =
-		ctx.layers[ctx.layer_map[layer_surface.pending.layer]];
+		ctx.layers[ctx.Layer.map[layer_surface.pending.layer]];
 
-	if (layer_surface == null) {
+	if (layer_surface.output == null) {
 		layer_surface.output = if (ctx.sel_monitor) |sm| sm.output else null;
 		if (layer_surface.output == null) {
 			c.wlr_layer_surface_v1_destroy(layer_surface);
@@ -272,7 +240,7 @@ fn createLayerSurface(_: ?*c.wl_listener, data: ?*anyopaque) void {
 
 	layer_surface.data = ctx.gpa.create(LayerSurface)
 		catch ctx.die("Failed to allocate memory!", .{}, 12);
-	var ls: *LayerSurface = layer_surface.data;
+	var ls: *LayerSurface = @alignCast(@ptrCast(layer_surface.data));
 	ls.kind = .layer_shell;
 
 	ctx.listenWrapper(&surface.events.commit, &ls.surface_commit, commitLayerSurfaceNotify);
@@ -307,30 +275,30 @@ fn createMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	output.data = mon;
 	mon.output = output;
 
-	for (mon.layers) |*layer| c.wl_list_init(layer);
+	for (&mon.layers) |*layer| c.wl_list_init(layer);
 
 	var state: c.wlr_output_state = undefined;
 	c.wlr_output_state_init(&state);
 
 	@memset(mon.tagset[0..2], 1);
 
-	for (userconfig.MONRULES) |monrule| {
-		if (monrule.name != null and
-			!std.mem.containsAtLeast(u8, output.name, 1, monrule.name.?))
+	for (&Monitor.rules) |rule| {
+		if (rule.name != null and
+			!std.mem.containsAtLeast(u8, std.mem.span(output.name), 1, rule.name.?))
 				continue;
 
-		mon.monitor.x = monrule.x;
-		mon.monitor.y = monrule.y;
-		mon.mfact = monrule.mfact;
-		mon.n_master = monrule.n_master;
-		mon.layout[0] = monrule.layout;
-		mon.layout[1] = &userconfig.LAYOUTS[
-			@intFromBool(userconfig.LAYOUTS.len > 1 and
-				monrule.layout != &userconfig.LAYOUTS[1])
+		mon.monitor.x = rule.x;
+		mon.monitor.y = rule.y;
+		mon.mfact = rule.mfact;
+		mon.master_n = rule.master_n;
+		mon.layout[0] = rule.layout;
+		mon.layout[1] = &Layout.layouts[
+			@intFromBool(Layout.layouts.len > 1 and
+				rule.layout != &Layout.layouts[1])
 		];
-		@memcpy(mon.ltsymbol, mon.layout[mon.sellt].symbol[0..mon.ltsymbol.len]);
-		c.wlr_output_state_set_scale(&state, monrule.scale);
-		c.wlr_output_state_set_transform(&state, monrule.rr);
+		@memcpy(&mon.ltsymbol, mon.layout[mon.sellt].symbol[0..mon.ltsymbol.len]);
+		c.wlr_output_state_set_scale(&state, rule.scale);
+		c.wlr_output_state_set_transform(&state, rule.rr);
 		break;
 	}
 
@@ -408,23 +376,23 @@ fn outputMgrTest(_: ?*c.wl_listener, data: ?*anyopaque) void {
 
 fn powerMgrSetMode(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	const event: *c.wlr_output_power_v1_set_mode_event = @alignCast(@ptrCast(data));
-	const state: c.wlr_output_state = undefined;
-	@memset(state, 0);
-
-	const mon: *Monitor = event.output.*.data orelse return;
+	const mon: *Monitor = if (event.output.*.data) |ptr| @alignCast(@ptrCast(ptr)) else
+		return;
 	mon.gamma_lut_changed = 1;
 
-	c.wlr_output_state_set_enabled(&state, event.mode);
-	c.wlr_output_commit_state(mon.output, &state);
+	var state = c.wlr_output_state{};
+	c.wlr_output_state_set_enabled(@ptrCast(&state), event.mode != 0);
+	_ = c.wlr_output_commit_state(mon.output, &state);
 
-	mon.asleep = !event.mode;
+	mon.asleep = @intFromBool(event.mode == 0);
 	updateMonitors(null, null);
 }
 
 fn urgent(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const event: *c.wlr_xdg_activation_v1_request_activate_event = @alignCast(@ptrCast(data));
-	const client: ?*Client = null;
-	_ = Client.toplevelFromWlrSurface(event.surface, &client, null);
+	const event: *c.wlr_xdg_activation_v1_request_activate_event =
+		@alignCast(@ptrCast(data));
+	const client: ?*const Client = null;
+	_ = Client.toplevelFromWlrSurface(event.surface, @constCast(@ptrCast(&client)), null);
 	if (client == null or c == ctx.sel_monitor.?.topmostClient()) return;
 
 	client.is_urgent = true;

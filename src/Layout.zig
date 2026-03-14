@@ -70,7 +70,7 @@ pub const arrange = struct {
 };
 
 pub const layouts = [_]Self{
-	.{ .symbol = "[]=", .arrange = arrange.tile    },
-	.{ .symbol = "><>", .arrange = null            },
-	.{ .symbol = "[M]", .arrange = arrange.monocle },
+	.{ .symbol = "[]=", .arrangeFn = arrange.tile    },
+	.{ .symbol = "><>", .arrangeFn = null            },
+	.{ .symbol = "[M]", .arrangeFn = arrange.monocle },
 };

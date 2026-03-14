@@ -49,11 +49,11 @@ is: packed struct(u8) {
 resize_to: u32,
 
 xwayland: if (config.xwayland) struct {
-	activate: c.wlr_listener,
-	associate: c.wlr_listener,
-	dissociate: c.wlr_listener,
-	configure: c.wlr_listener,
-	set_hints: c.wlr_listener,
+	activate: c.wl_listener,
+	associate: c.wl_listener,
+	dissociate: c.wl_listener,
+	configure: c.wl_listener,
+	set_hints: c.wl_listener,
 } else void,
 
 pub fn focus(self: *const Self, list: c_int) void {
@@ -61,6 +61,18 @@ pub fn focus(self: *const Self, list: c_int) void {
 	// TODO
 	_ = self;
 	_ = list;
+}
+
+pub fn notifyEnter(surface: *const c.wlr_surface, keyboard: ?*const c.wlr_keyboard) void {
+	if (keyboard) |kb| {
+		c.wlr_seat_keyboard_notify_enter(
+			ctx.seat,
+			surface,
+			kb.keycodes, kb.num_keycodes, &kb.modifiers
+		);
+	} else {
+		c.wlr_seat_keyboard_notify_clear_focus(ctx.seat, surface, null, 0, null);
+	}
 }
 
 pub inline fn toplevelFromWlrSurface(
