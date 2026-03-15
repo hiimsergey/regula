@@ -260,12 +260,12 @@ pub fn die(comptime fmt: []const u8, args: anytype, comptime stat: u8) noreturn 
 }
 
 pub fn listenWrapper(
-	event: c.wl_signal,
-	listener: c.wl_listener,
-	handler: fn (c.wl_listener, *anyopaque) void
+	event: [*c]c.wl_signal,
+	listener: *c.wl_listener,
+	handler: fn ([*]c.wl_listener, ?*anyopaque) callconv(.c) void
 ) void {
 	listener.notify = handler;
-	c.wl_signal_add(event, handler, listener);
+	c.wl_signal_add(event, @ptrCast(listener));
 }
 
 fn handlesig(signo: i32) callconv(.c) void {

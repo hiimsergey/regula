@@ -75,25 +75,28 @@ pub fn notifyEnter(surface: *const c.wlr_surface, keyboard: ?*const c.wlr_keyboa
 	}
 }
 
-pub inline fn toplevelFromWlrSurface(
+pub fn toplevelFromWlrSurface(
 	sur: ?*c.wlr_surface,
 	cl_ptr: ?**const Self,
 	lysur_ptr: ?**const LayerSurface
-) i32 {
+) Type {
 	var client_type = Type.invalid;
 	var client: *Self = undefined;
 	var our_ls: *LayerSurface = undefined;
 
 	body: {
 		const root_surface: *c.wlr_surface =
-			c.wlr_surface_get_root_surface(sur orelse return -1);
+			c.wlr_surface_get_root_surface(sur orelse return .invalid);
 
 		if (config.xwayland) {
 			const xsurface: ?*c.wlr_xwayland_surface =
 				c.wlr_xwayland_surface_try_from_wlr_surface(root_surface);
 			if (@intFromPtr(xsurface) != 0) {
-				client = xsurface.data;
-				client_type = client.type;
+				client = @alignCast(@ptrCast(xsurface.?.*.data.?));
+				client_type = switch (client.surface) {
+					.xdg => .xdg_shell,
+					.xwayland => .x11
+				};
 				break :body;
 			}
 		}
@@ -101,14 +104,14 @@ pub inline fn toplevelFromWlrSurface(
 		const layer_surface: ?*c.wlr_layer_surface_v1 =
 			c.wlr_layer_surface_v1_try_from_wlr_surface(root_surface);
 		if (@intFromPtr(layer_surface) != 0) {
-			our_ls = layer_surface.data;
+			our_ls = @alignCast(@ptrCast(layer_surface.?.*.data.?));
 			client_type = .layer_shell;
 			break :body;
 		}
 
-		const xdg_surface: *c.wlr_xdg_surface =
+		const xdg_surface: ?*c.wlr_xdg_surface =
 			c.wlr_xdg_surface_try_from_wlr_surface(root_surface);
-		while (xdg_surface) |xdgsur| {
+		while (xdg_surface) |*xdgsur| {
 			var tmp_xdgsur: ?*c.wlr_xdg_surface = null;
 			switch (xdgsur.role) {
 				c.WLR_XDG_SURFACE_ROLE_POPUP => {
@@ -123,14 +126,18 @@ pub inline fn toplevelFromWlrSurface(
 						cl_ptr, lysur_ptr
 					);
 
-					xdgsur = tmp_xdgsur;
+					xdgsur.* = tmp_xdgsur;
 				},
 				c.WLR_XDG_SURFACE_ROLE_TOPLEVEL => {
 					client = @ptrCast(xdgsur.data);
-					client_type = client.kind;
+					client_type = switch (client.surface) {
+						.xdg => .xdg_shell,
+						.xwayland => .x11
+					};
 					break :body;
 				},
-				c.WLR_XDG_SURFACE_ROLE_NONE, _ => return .invalid
+				c.WLR_XDG_SURFACE_ROLE_NONE => return .invalid,
+				else => unreachable
 			}
 		}
 	}
@@ -138,10 +145,10 @@ pub inline fn toplevelFromWlrSurface(
 	if (lysur_ptr) |pl| pl.* = our_ls;
 	if (cl_ptr) |pc| pc.* = client;
 
-	return @intFromEnum(client_type);
+	return client_type;
 }
 
-inline fn activateSurface(surface: *const c.wlr_surface, activated: bool) void {
+pub fn activateSurface(surface: [*c]c.wlr_surface, activated: bool) void {
 	if (config.xwayland) ifc: {
 		const xsurface: *const c.wlr_xwayland_surface =
 			c.wlr_xwayland_surface_try_from_wlr_surface(surface) orelse break :ifc;
@@ -154,7 +161,7 @@ inline fn activateSurface(surface: *const c.wlr_surface, activated: bool) void {
 	c.wlr_xdg_toplevel_set_activated(toplevel, activated);
 }
 
-inline fn setBounds(self: *const Self, w: i32, h: i32) u32 {
+fn setBounds(self: *const Self, w: i32, h: i32) u32 {
 	if (config.xwayland and self.surface == .xwayland) return 0;
 
 	if (c.wl_resource_get_version(self.surface.xdg.unnamed_0.toplevel.*.resource) <
@@ -167,14 +174,14 @@ inline fn setBounds(self: *const Self, w: i32, h: i32) u32 {
 	return c.wlr_xdg_toplevel_set_bounds(self.surface.xdg.unnamed_0.toplevel, w, h);
 }
 
-inline fn getAppId(self: *const Self) [*]const u8 {
+fn getAppId(self: *const Self) [*]const u8 {
 	const broken: [*]const u8 = "broken";
 	if (config.xwayland and self.surface == .xwayland)
 		return if (self.surface.xwayland.class) |cls| cls else broken;
 	return if (self.surface.xdg.unnamed_0.toplevel.*.app_id) |appid| appid else broken;
 }
 
-inline fn getClip(self: *const Self) c.wlr_box {
+fn getClip(self: *const Self) c.wlr_box {
 	var result = self.wlr_box{
 		.x = 0, .y = 0,
 		.width = self.geom.width - self.bw,
@@ -187,7 +194,7 @@ inline fn getClip(self: *const Self) c.wlr_box {
 	return result;
 }
 
-inline fn getGeometry(self: *const Self) c.wlr_box {
+fn getGeometry(self: *const Self) c.wlr_box {
 	if (config.xwayland and self.surface == .xwayland) {
 		const xw = &self.surface.xwayland;
 		return .{
@@ -198,7 +205,7 @@ inline fn getGeometry(self: *const Self) c.wlr_box {
 	return self.surface.xdg.geometry;
 }
 
-inline fn getParent(self: *const Self) ?*Self {
+fn getParent(self: *const Self) ?*Self {
 	var result: ?*Self = null;
 	if (config.xwayland and self.surface == .xwayland) {
 		if (self.surface.xwayland.parent != null)
@@ -213,7 +220,7 @@ inline fn getParent(self: *const Self) ?*Self {
 	return result;
 }
 
-inline fn hasChildren(self: *const Self) bool {
+fn hasChildren(self: *const Self) bool {
 	if (config.xwayland and self.surface == .xwayland)
 		return !c.wl_list_empty(&self.surface.xwayland.children);
 	// `surface.xdg->link` is never empty because it always contains at least the
@@ -221,14 +228,14 @@ inline fn hasChildren(self: *const Self) bool {
 	return c.wl_list_length(&self.surface.xdg.link) > 1;
 }
 
-inline fn getTitle(self: *const Self) [*]const u8 {
+fn getTitle(self: *const Self) [*]const u8 {
 	const broken = "broken";
 	if (config.xwayland and self.surface == .xwayland)
 		return if (self.surface.xwayland.title) |title| title else broken;
 	return if (self.surface.xdg.unnamed_0.toplevel.*.title) |title| title else broken;
 }
 
-inline fn isFloatType(self: *const Self) bool {
+fn isFloatType(self: *const Self) bool {
 	if (config.xwayland and self.surface == .xwayland) {
 		const surface: *const c.wlr_xwayland_surface = self.surface.xwayland;
 		const hints: *const c.xcb_size_hints_t = surface.size_hints;
@@ -255,13 +262,13 @@ inline fn isFloatType(self: *const Self) bool {
 		(state.min_width == state.max_width or state.min_height == state.max_height));
 }
 
-inline fn isOnMonitor(self: *const Self, monitor: *const Monitor) bool {
+fn isOnMonitor(self: *const Self, monitor: *const Monitor) bool {
 	// TODO
 	_ = self;
 	_ = monitor;
 }
 
-inline fn isStopped(self: *const Self) bool {
+fn isStopped(self: *const Self) bool {
 	if (config.xwayland and self.surface == .xwayland) return false;
 
 	var pid: c_int = undefined;
@@ -280,7 +287,7 @@ inline fn isStopped(self: *const Self) bool {
 	return false;
 }
 
-inline fn isUnmanaged(self: *const Self) bool {
+fn isUnmanaged(self: *const Self) bool {
 	return if (config.xwayland and self.surface == .xwayland)
 		self.surface.xwayland.override_redirect
 		else false;
@@ -344,7 +351,7 @@ fn setBorderColor(self: *const Self, color: [4]f32) void {
 	inline for (0..4) |i| c.wlr_scene_rect_set_color(self.border[i], color);
 }
 
-inline fn setSize(self: *const Self, w: u32, h: u32) u32 {
+fn setSize(self: *const Self, w: u32, h: u32) u32 {
 	if (config.xwayland and self.surface == .xwayland) {
 		c.wlr_xwayland_surface_configure(
 			self.surface.xwayland,

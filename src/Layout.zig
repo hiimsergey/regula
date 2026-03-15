@@ -35,8 +35,8 @@ pub const arrange = struct {
 		}
 		if (n == 0) return;
 
-		const mw: u32 = if (n > mon.n_master)
-			if (mon.n_master > 0) @round(mon.window.width * mon.mfact) else 0
+		const mw: u32 = if (n > mon.master_n)
+			if (mon.master_n > 0) @round(mon.window.width * mon.mfact) else 0
 			else mon.window.width;
 
 		var i: u32 = 0;
@@ -48,12 +48,12 @@ pub const arrange = struct {
 			i += 1;
 		}) {
 			if (!cl.visibleOn(mon) or cl.is_floating or cl.is_fullscreen) continue;
-			if (i < mon.n_master) {
+			if (i < mon.master_n) {
 				cl.resize(.{
 					.x = mon.window.x,
 					.y = mon.window.y,
 					.width = mw,
-					.height = @divFloor(mon.window.height - my, @min(n, mon.n_master) - i)
+					.height = @divFloor(mon.window.height - my, @min(n, mon.master_n) - i)
 				}, false);
 				my = cl.geom.height;
 			} else {

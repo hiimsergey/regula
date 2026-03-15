@@ -86,59 +86,59 @@ pub fn cleanup() void {
 	}
 }
 
-fn cleanupMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn cleanupMonitor(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn commitLayerSurfaceNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn commitLayerSurfaceNotify(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn destroyLayerSurfaceNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn destroyLayerSurfaceNotify(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn renderMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn renderMonitor(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn requestMonitorState(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn requestMonitorState(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn unmapLayerSurfaceNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn unmapLayerSurfaceNotify(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
 // Listeners;
 
-fn axisNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn axisNotify(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn buttonPress(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn buttonPress(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn cursorFrame(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn cursorFrame(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn motionRelative(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn motionRelative(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn motionAbsolute(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn motionAbsolute(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
@@ -167,7 +167,7 @@ fn gpuReset(_: ?*c.wl_listener, _: ?*anyopaque) void {
 		c.wlr_output_init_render(m.output, ctx.alloc, ctx.renderer);
 }
 
-fn updateMonitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn updateMonitors(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	const output_config: *c.wlr_output_configuration_v1 =
 		c.wlr_output_configuration_v1_create().?;
 	const config_head: *c.wlr_output_configuration_head_v1 = undefined; // TODO make var
@@ -199,8 +199,8 @@ fn updateMonitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
 		selmon.focusTop().?.focus(1);
 
 		if (selmon.lock_surface) |locksurf| {
-			Client.notifyEnter(locksurf, c.wlr_seat_get_keyboard(ctx.seat));
-			Client.activeSurface(locksurf.surface, 1);
+			Client.notifyEnter(locksurf.surface, c.wlr_seat_get_keyboard(ctx.seat));
+			Client.activateSurface(locksurf.surface, true);
 		}
 	}
 
@@ -214,21 +214,21 @@ fn updateMonitors(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	c.wlr_output_manager_v1_set_configuration(ctx.output_mgr, output_config);
 }
 
-fn createIdleInhibitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn createIdleInhibitor(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn inputDevice(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn inputDevice(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn createLayerSurface(_: ?*c.wl_listener, data: ?*anyopaque) void {
-	const layer_surface: *c.wlr_layer_surface_v1 = @alignCast(@ptrCast(data.?));
-	const surface: *const c.wlr_surface = layer_surface.surface;
-	const scene_layer: *const c.wlr_scene_tree =
-		ctx.layers[ctx.Layer.map[layer_surface.pending.layer]];
+fn createLayerSurface(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
+	const layer_surface: *c.wlr_layer_surface_v1 = @alignCast(@ptrCast(data));
+	const surface: *c.wlr_surface = layer_surface.surface;
+	const scene_layer: [*c]c.wlr_scene_tree =
+		@ptrCast(ctx.layers[ctx.Layer.map[layer_surface.pending.layer]]);
 
 	if (layer_surface.output == null) {
 		layer_surface.output = if (ctx.sel_monitor) |sm| sm.output else null;
@@ -248,7 +248,7 @@ fn createLayerSurface(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	ctx.listenWrapper(&layer_surface.events.destroy, &ls.destroy, destroyLayerSurfaceNotify);
 
 	ls.layer_surface = layer_surface;
-	ls.monitor = layer_surface.output.*.data;
+	ls.monitor = @alignCast(@ptrCast(layer_surface.output.*.data));
 	ls.scene_layer = c.wlr_scene_layer_surface_v1_create(scene_layer, layer_surface);
 	ls.scene = ls.scene_layer.tree;
 
@@ -257,7 +257,7 @@ fn createLayerSurface(_: ?*c.wl_listener, data: ?*anyopaque) void {
 			ctx.layers[@intFromEnum(ctx.Layer.top)]
 		else scene_layer
 	);
-	ls.popups = surface.data;
+	ls.popups = @alignCast(@ptrCast(surface.data.?));
 	ls.popups.node.data = ls;
 	ls.scene.node.data = ls;
 
@@ -265,7 +265,7 @@ fn createLayerSurface(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	c.wlr_surface_send_enter(surface, layer_surface.output);
 }
 
-fn createMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn createMonitor(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	const output: *c.wlr_output = @alignCast(@ptrCast(data));
 
 	if (!c.wlr_output_init_render(output, ctx.alloc, ctx.renderer)) return;
@@ -308,8 +308,8 @@ fn createMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	ctx.listenWrapper(&output.events.destroy, &mon.destroy, cleanupMonitor);
 	ctx.listenWrapper(&output.events.request_state, &mon.request_state, requestMonitorState);
 
-	c.wlr_output_state_set_enabled(&state, 1);
-	c.wlr_output_commit_state(output, &state);
+	c.wlr_output_state_set_enabled(&state, true);
+	_ = c.wlr_output_commit_state(output, &state);
 	c.wlr_output_state_finish(&state);
 
 	// TODO CONSIDER REPLACE wl_list with ArrayList
@@ -329,52 +329,52 @@ fn createMonitor(_: ?*c.wl_listener, data: ?*anyopaque) void {
 		c.wlr_output_layout_add(ctx.output_layout, output, mon.monitor.x, mon.monitor.y);
 }
 
-fn createPointerConstraint(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn createPointerConstraint(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn lockSession(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn lockSession(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn virtualKeyboard(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn virtualKeyboard(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn virtualPointer(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn virtualPointer(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn createDecoration(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn createDecoration(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn createPopup(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn createPopup(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn createNotify(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn createNotify(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn outputMgrApply(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn outputMgrApply(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn outputMgrTest(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn outputMgrTest(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn powerMgrSetMode(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn powerMgrSetMode(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	const event: *c.wlr_output_power_v1_set_mode_event = @alignCast(@ptrCast(data));
 	const mon: *Monitor = if (event.output.*.data) |ptr| @alignCast(@ptrCast(ptr)) else
 		return;
@@ -388,7 +388,7 @@ fn powerMgrSetMode(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	updateMonitors(null, null);
 }
 
-fn urgent(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn urgent(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	const event: *c.wlr_xdg_activation_v1_request_activate_event =
 		@alignCast(@ptrCast(data));
 	const client: ?*const Client = null;
@@ -403,42 +403,42 @@ fn urgent(_: ?*c.wl_listener, data: ?*anyopaque) void {
 	}) client.setBorderColor(userconfig.urgent_color);
 }
 
-fn setCursor(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn setCursor(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn setCursorShape(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn setCursorShape(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn setPSel(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn setPSel(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn setSel(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn setSel(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn requestStartDrag(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn requestStartDrag(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn startDrag(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn startDrag(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn createNotifyX11(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn createNotifyX11(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
 
-fn xwaylandReady(_: ?*c.wl_listener, data: ?*anyopaque) void {
+fn xwaylandReady(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
