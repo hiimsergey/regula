@@ -3,7 +3,7 @@ const std = @import("std");
 const linux = std.os.linux;
 const log = std.log;
 const c = @import("c.zig").c;
-const listeners = @import("listeners.zig");
+const lsrs = @import("listeners.zig");
 const userconfig = @import("userconfig.zig");
 
 const AllocatorWrapper = @import("AllocatorWrapper.zig");
@@ -34,22 +34,60 @@ pub const Layer = enum(u8) {
 const KeyboardGroup = struct {
 	interface: c.wlr_keyboard_group,
 
-	symbol_nr: c_int,
+	n_symbols: c_int,
 	key_symbols: *const c.xkb_keysym_t,
 	mods: u32,
+	key_repeat_source: *const c.wl_event_source,
 
-	modifiersFn: c.wl_listener,
-	keyFn: c.wl_listener,
-	destroyFn: c.wl_listener,
+	modifiers_lsr: c.wl_listener,
+	key_lsr: c.wl_listener,
+	destroy_lsr: c.wl_listener,
 
-	fn destroy(_: ?*c.wl_listener, _: ?*anyopaque) void {
-		// TODO
+	fn init() *KeyboardGroup {
+		const group = gpa.create(KeyboardGroup)
+			catch die("Failed to allocate memory!", .{}, 12);
+		group.interface = c.wlr_keyboard_group_create();
+		group.interface.data = group;
+
+		const ctx: *const c.xkb_context = c.xkb_context_new(c.XKB_CONTEXT_NO_FLAGS);
+		const keymap: *const c.xkb_keymap = c.xkb_keymap_new_from_names(ctx,
+			&userconfig.xkb_rules,
+			c.XKB_KEYMAP_COMPILE_NO_FLAGS)
+		orelse die("Failed to compile keymap!", .{}, 1);
+
+		c.wlr_keyboard_set_keymap(&group.interface.keyboard, keymap);
+		c.xkb_keymap_unref(keymap);
+		c.xkb_context_unref(ctx);
+
+		c.wlr_keyboard_set_repeat_info(
+			&group.interface.keyboard,
+			userconfig.repeat_rate,
+			userconfig.repeat_delay);
+
+		listenWrapper(&group.interface.keyboard.events.key, &group.key_lsr, lsrs.keypress);
+		listenWrapper(&group.interface.keyboard.events.modifiers, &group.modifiers_lsr, lsrs.keypressMod);
+
+		group.key_repeat_source = c.wl_event_loop_add_timer(event_loop, lsrs.keyRepeat, group);
+
+		c.wlr_seat_set_keyboard(seat, &group.interface.keyboard);
+		return group;
+	}
+
+	fn destroy(listener: ?*c.wl_listener, _: ?*anyopaque) void {
+		var group: *const KeyboardGroup = undefined;
+		group = c.wl_container_of(listener, group, "destroy");
+		c.wl_event_source_remove(group.key_repeat_source);
+		c.wl_list_remove(&group.key_lsr.link);
+		c.wl_list_remove(&group.modifiers_lsr.link);
+		c.wl_list_remove(&group.destroy_lsr.link);
+		c.wlr_keyboard_group_destroy(group.interface);
+		gpa.free(group);
 	}
 };
 
 const LayerSurface = struct {
-	// TODO why
 	// NOTE must keep this field first
+	// TODO why
 	kind: c_uint,
 
 	mon: *Monitor,
@@ -122,9 +160,9 @@ pub var sel_monitor: ?*Monitor = undefined;
 
 pub var xwayland: if (config.xwayland) [*c]c.wlr_xwayland else void = undefined;
 
-pub fn init() !void {
+pub fn init(proc_init: std.process.Init) !void {
 	aw = AllocatorWrapper.init();
-	gpa = aw.allocator(std.heap.c_allocator);
+	gpa = proc_init.gpa;
 
 	// Reset signal handlers for SIGCHLD, SIGINT, SIGTERM and SIGPIPE
 	const sa = linux.Sigaction{
@@ -162,7 +200,7 @@ pub fn init() !void {
 		log.err("wlroots: Failed to create renderer!", .{});
 		return error.Generic;
 	};
-	c.wl_signal_add(&renderer.events.lost, &listeners.items.gpu_reset);
+	c.wl_signal_add(&renderer.events.lost, &lsrs.items.gpu_reset);
 
 	c.wlr_renderer_init_wl_shm(renderer, display);
 
@@ -195,7 +233,7 @@ pub fn init() !void {
 	c.wlr_alpha_modifier_v1_create(display);
 
 	activation = c.wlr_xdg_activation_v1_create(display);
-	c.wl_signal_add(&activation.events.request_activate, &listeners.request_activate);
+	c.wl_signal_add(&activation.events.request_activate, &lsrs.request_activate);
 
 	c.wlr_scene_set_gamma_control_manager_v1(
 		scene,
@@ -203,31 +241,91 @@ pub fn init() !void {
 	);
 
 	power_mgr = c.wlr_output_power_manager_v1_create(display);
-	c.wl_signal_add(&power_mgr.events.set_mode, &listeners.items.output_power_mgr_set_node);
+	c.wl_signal_add(&power_mgr.events.set_mode, &lsrs.items.output_power_mgr_set_node);
 
 	output_layout = c.wlr_output_layout_create(display);
-	c.wl_signal_add(&output_layout.events.change, &listeners.items.layout_change);
+	c.wl_signal_add(&output_layout.events.change, &lsrs.items.layout_change);
 
 	c.wlr_xdg_output_manager_v1_create(display, output_layout);
 
 	c.wl_list_init(&monitors);
-	c.wl_signal_add(&backend.events.new_output, &listeners.items.new_output);
+	c.wl_signal_add(&backend.events.new_output, &lsrs.items.new_output);
 
 	c.wl_list_init(&clients);
 	c.wl_list_init(&focus_stack);
 
 	xdg_shell = c.wlr_xdg_shell_create(display, 6);
-	c.wl_signal_add(&xdg_shell.events.new_toplevel, &listeners.items.new_xdg_toplevel);
-	c.wl_signal_add(&xdg_shell.events.new_popup, &listeners.items.new_xdg_popup);
+	c.wl_signal_add(&xdg_shell.events.new_toplevel, &lsrs.items.new_xdg_toplevel);
+	c.wl_signal_add(&xdg_shell.events.new_popup, &lsrs.items.new_xdg_popup);
 
 	layer_shell = c.wlr_layer_shell_v1_create(display, 3);
-	c.wl_signal_add(&layer_shell.events.new_surface, &listeners.items.new_layer_surcace);
+	c.wl_signal_add(&layer_shell.events.new_surface, &lsrs.items.new_layer_surface);
+
+	idle_notifier = c.wlr_idle_notifier_v1_create(display);
+
+	idle_inhibit_mgr = c.wlr_idle_inhibit_v1_create(display);
+	c.wl_signal_add(&idle_inhibit_mgr.events.new_inhibitor, &lsrs.items.new_inhibitor);
+
+	session_lock_mgr = c.wlr_session_lock_manager_v1_create(display);
+	c.wl_signal_add(&session_lock_mgr.events.new_lock, &lsrs.items.new_session_lock);
+
+	locked_bg = c.wlr_scene_rect_create(
+		layers[@intFromEnum(Layer.block)],
+		screen_geom.width, screen_geom.height,
+		[_]f32{0.1, 0.1, 0.1, 1.0});
+	c.wlr_scene_node_set_enabled(&locked_bg.node, 0);
+
+	c.wlr_server_decoration_manager_set_default_mode(
+		c.wlr_server_decoration_manager_create(display),
+		c.WLR_SERVER_DECORATION_MANAGER_MODE_SERVER);
+	xdg_decoration_mgr = c.wlr_xdg_decoration_manager_v1_create(display);
+	c.wl_signal_add(&xdg_decoration_mgr.events.new_toplevel_decoration, &lsrs.items.new_xdg_decoration);
+
+	ptr_constraints = c.wlr_pointer_constraints_v1_create(display);
+	c.wl_signal_add(&ptr_constraints.events.new_constraint, &lsrs.items.new_pointer_constraint);
+
+	relative_ptr_mgr = c.wlr_relative_pointer_manager_v1_create(display);
+
+	cursor = c.wlr_cursor_create();
+	c.wlr_cursor_attach_output_layout(cursor, output_layout);
+
+	cursor_mgr = c.wlr_xcursor_manager_create(null, 24);
+	proc_init.environ_map.put("XCURSOR_SIZE", "24", 1) catch {
+		log.err("Failed to change environment variable XCURSOR_SIZE", .{});
+		return error.Generic;
+	};
+
+	c.wl_signal_add(&cursor.events.motion, &lsrs.items.cursor_motion);
+	c.wl_signal_add(&cursor.events.motion_absolute, &lsrs.items.cursor_motion_absolute);
+	c.wl_signal_add(&cursor.events.button, &lsrs.items.cursor_button);
+	c.wl_signal_add(&cursor.events.axis, &lsrs.items.cursor_axis);
+	c.wl_signal_add(&cursor.events.frame, &lsrs.items.cursor_frame);
+
+	cursor_shape_mgr = c.wlr_cursor_shape_manager_v1_create(display, 1);
+	c.wl_signal_add(&cursor_shape_mgr.events.request_set_shape, &lsrs.items.request_set_cursor_shape);
+
+	c.wl_signal_add(&backend.events.new_input, &lsrs.items.new_input_device);
+
+	virtual_keyboard_mgr = c.wlr_virtual_keyboard_manager_v1_create(display);
+	c.wl_signal_add(&virtual_keyboard_mgr.events.new_virtual_keyboard, &lsrs.items.new_virtal_keyboard);
+
+	virtual_pointer_mgr = c.wlr_virtual_pointer_manager_v1_create(display);
+	c.wl_signal_add(&virtual_pointer_mgr.events.new_virtual_pointer, &lsrs.items.new_virtual_pointer);
+
+	seat = c.wlr_seat_create(display, "seat0");
+	c.wl_signal_add(&seat.events.request_set_cursor, &lsrs.items.request_cursor);
+	c.wl_signal_add(&seat.events.request_set_selection, &lsrs.items.request_set_sel);
+	c.wl_signal_add(&seat.events.request_set_primary_selection, &lsrs.items.request_set_psel);
+	c.wl_signal_add(&seat.events.request_start_drag, &lsrs.items.request_start_drag);
+	c.wl_signal_add(&seat.events.start_drag, &lsrs.items.start_drag);
+
+	kb_group = KeyboardGroup.init();
 }
 
 pub fn deinit() void {
 	aw.deinit();
 
-	listeners.cleanup();
+	lsrs.cleanup();
 	if (config.xwayland) {
 		c.wlr_xwayland_destroy(xwayland);
 		xwayland = null;
@@ -241,7 +339,7 @@ pub fn deinit() void {
 	}
 	c.wlr_xcursor_manager_destroy(cursor_mgr);
 
-	KeyboardGroup.destroy(&kb_group.destroyFn, null);
+	KeyboardGroup.destroy(&kb_group.destroy_lsr, null);
 
 	// If it's not destroyed manually, it will cause a use-after-free of wlr_seat.
 	// Destroy it until it's fixed on the wlroots side.

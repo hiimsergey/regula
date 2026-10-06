@@ -3,6 +3,8 @@ const log = std.log;
 const c = @import("c.zig").c;
 const ctx = @import("globals.zig");
 
+// TODO NOW CONSIDER ALL REPLACE wl_list with std linked list or arraylist
+
 pub const help_text =
 	\\RegulaWM - an extensible Wayland compositor with sane defaults
 	\\
@@ -19,10 +21,10 @@ pub const help_text =
 
 pub const version = "0.0.0";
 
-pub fn main() u8 {
+pub fn main(init: std.process.Init) u8 {
 	if (handleArgs()) |stat| return stat;
 
-	ctx.init() catch return 1;
+	ctx.init(init.gpa) catch return 1;
 	defer ctx.deinit();
 
 	const xdg_runtime_dir_set: bool = std.process.hasEnvVar(ctx.gpa, "XDG_RUNTIME_DIR")

@@ -8,12 +8,26 @@ const Monitor = @import("Monitor.zig");
 
 pub const fullscreen_bg = color(0x18_18_18_ff);
 
-/// Default background color
+/// Background color
 pub const root_color = color(0x22_22_22_ff);
 
-/// Defaut border color for urgent windows
+/// Border color for urgent windows
 pub const urgent_color = color(0xff_00_00_ff);
 
+/// Keyboard configuration
+pub const xkb_rules = c.xkb_rule_names{
+	.layout = "lavrent,ru",
+	.variant = ",phonetic",
+	.options = "grp:alt_caps_toggle,caps:swapescape"
+};
+
+/// TODO COMMENT + CONSIDER MOVE
+pub const repeat_rate: u32 = 50;
+
+/// TODO COMMENT + CONSIDER MOVE
+pub const repeat_delay: u32 = 200;
+
+// TODO COMMENT
 fn color(comptime hex: u32) [4]f32 {
 	return .{
 		(hex >> 24) & 0xff / 255,

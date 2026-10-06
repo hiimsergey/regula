@@ -12,24 +12,15 @@ const Layout = @import("Layout.zig");
 const Monitor = @import("Monitor.zig");
 
 const ListenerList: type = T: {
-	var fields: [list.kvs.len]StructField = undefined;
+	const field_names: [list.kvs.len][]const u8 = list.keys();
 
-	for (list.keys(), &fields) |name, *field| {
-		field.* = StructField{
-			.name = name,
-			.type = c.wl_listener,
-			.alignment = @alignOf(c.wl_listener),
-			.default_value_ptr = null,
-			.is_comptime = true
-		};
-	}
+	const attr = StructField.Attributes{
+		.default_value_ptr = null,
+		.@"align" = @alignOf(c.wl_listener),
+		.@"comptime" = true
+	};
 
-	break :T @Type(.{ .@"struct" = .{
-		.fields = fields,
-		.decls = &.{},
-		.layout = .auto,
-		.is_tuple = false
-	} });
+	break :T @Struct(.auto, null, field_names, @splat(c.wl_listener), @splat(attr));
 };
 
 pub const items: ListenerList = listeners: {
@@ -116,7 +107,7 @@ fn unmapLayerSurfaceNotify(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c)
 	_ = data;
 }
 
-// Listeners;
+// TODO FINAL CHECK proper sorting
 
 fn axisNotify(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
@@ -129,6 +120,21 @@ fn buttonPress(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 }
 
 fn cursorFrame(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
+	// TODO
+	_ = data;
+}
+
+pub fn keypress(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
+	// TODO
+	_ = data;
+}
+
+pub fn keypressMod(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
+	// TODO
+	_ = data;
+}
+
+pub fn keyRepeat(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
@@ -224,6 +230,7 @@ fn inputDevice(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	_ = data;
 }
 
+// TODO CONSIDER MOVE
 fn createLayerSurface(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	const layer_surface: *c.wlr_layer_surface_v1 = @alignCast(@ptrCast(data));
 	const surface: *c.wlr_surface = layer_surface.surface;
@@ -239,6 +246,7 @@ fn createLayerSurface(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void
 	}
 
 	layer_surface.data = ctx.gpa.create(LayerSurface)
+		// TODO CONSIDER outsourcing this error message
 		catch ctx.die("Failed to allocate memory!", .{}, 12);
 	var ls: *LayerSurface = @alignCast(@ptrCast(layer_surface.data));
 	ls.kind = .layer_shell;
