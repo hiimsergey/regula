@@ -3,6 +3,7 @@ const std = @import("std");
 const linux = std.os.linux;
 const c = @import("c.zig").c;
 const ctx = @import("globals.zig");
+const lsrs = @import("listeners.zig");
 const userconfig = @import("userconfig.zig");
 
 const StructField = std.builtin.Type.StructField;
@@ -23,13 +24,13 @@ const ListenerList: type = T: {
 	break :T @Struct(.auto, null, field_names, @splat(c.wl_listener), @splat(attr));
 };
 
-pub const items: ListenerList = listeners: {
+pub const items: ListenerList = items: {
 	var result: ListenerList = undefined;
 	for (@typeInfo(ListenerList).@"struct".fields) |field| {
-		const listener = c.wl_listener{ .notify = list.get(field.name).? };
-		@field(result, field.name) = listener;
+		const lsr = c.wl_listener{ .notify = list.get(field.name).? };
+		@field(result, field.name) = lsr;
 	}
-	break :listeners result;
+	break :items result;
 };
 
 const list = std.StaticStringMap(c.wl_notify_func_t).initComptime(.{
@@ -66,10 +67,10 @@ const list = std.StaticStringMap(c.wl_notify_func_t).initComptime(.{
 	"xwayland_ready",          &xwaylandReady
 } else .{});
 
-pub fn cleanup() void {
+pub fn deinit() void {
 	for (@typeInfo(ListenerList).@"struct".fields) |field| {
-		const listener: c.wl_listener = &@field(items, field.name);
-		c.wl_list_remove(&listener.link);
+		const lsr: c.wl_listener = &@field(items, field.name);
+		c.wl_list_remove(&lsr.link);
 	}
 	if (config.xwayland) {
 		c.wl_list_remove(&items.new_xwayland_surface.link);
@@ -157,10 +158,10 @@ fn gpuReset(_: ?*c.wl_listener, _: ?*anyopaque) void {
 		c.wlr_renderer_destroy(old_renderer);
 	}
 
-	ctx.renderer = c.wlr_renderer_autocreate(ctx.backend) orelse
-		ctx.die("wlroots: Failed to create renderer!", .{}, 1);
-	ctx.alloc = c.wlr_allocator_autocreate(ctx.backend, ctx.renderer) orelse
-		ctx.die("wlroots: Failed to create allocator!", .{}, 1);
+	ctx.renderer = c.wlr_renderer_autocreate(ctx.backend)
+		orelse ctx.die("wlroots: Failed to create renderer!", .{}, 1);
+	ctx.alloc = c.wlr_allocator_autocreate(ctx.backend, ctx.renderer)
+		orelse ctx.die("wlroots: Failed to create allocator!", .{}, 1);
 
 	c.wl_list_remove(&items.gpu_reset.link);
 	c.wl_signal_add(&ctx.renderer.events.lost, &items.gpu_reset);
@@ -200,9 +201,9 @@ fn updateMonitors(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO wl_list_for_each
 
 	if (ctx.sel_monitor != null and ctx.sel_monitor.?.output.enabled) {
-		const selmon = ctx.sel_monitor.?;
+		const selmon: *const Monitor = ctx.sel_monitor.?;
 		// TODO wl_list_for_each
-		selmon.focusTop().?.focus(1);
+		selmon.topmostClient().?.focus(1);
 
 		if (selmon.lock_surface) |locksurf| {
 			Client.notifyEnter(locksurf.surface, c.wlr_seat_get_keyboard(ctx.seat));
@@ -262,7 +263,7 @@ fn createLayerSurface(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void
 
 	surface.data = c.wlr_scene_tree_create(
 		if (layer_surface.current.layer < c.ZWLR_LAYER_SHELL_V1_LAYER_TOP)
-			ctx.layers[@intFromEnum(ctx.Layer.top)]
+			ctx.layers[@backingInt(ctx.Layer.top)]
 		else scene_layer
 	);
 	ls.popups = @alignCast(@ptrCast(surface.data.?));
@@ -324,7 +325,7 @@ fn createMonitor(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	c.wl_list_insert(&ctx.monitors, &mon.link);
 
 	mon.fullscreen_bg = c.wlr_scene_rect_create(
-		ctx.layers[@intFromEnum(ctx.Layer.fs)],
+		ctx.layers[@backingInt(ctx.Layer.fs)],
 		0, 0,
 		ctx.FULLSCREEN_BG
 	);
@@ -353,8 +354,12 @@ fn virtualKeyboard(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 }
 
 fn virtualPointer(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
-	// TODO
-	_ = data;
+	const event: *const c.wlr_virtual_pointer_v1_new_pointer_event = @ptrCast(data.?);
+	const device: *const c.wlr_input_device = &event.new_pointer.*.pointer.base;
+
+	c.wlr_cursor_attach_input_device(ctx.cursor, device);
+	if (event.suggested_output)
+		c.wlr_cursor_map_input_to_output(ctx.cursor, device, event.suggested_output);
 }
 
 fn createDecoration(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
@@ -368,8 +373,21 @@ fn createPopup(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 }
 
 fn createNotify(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
-	// TODO
-	_ = data;
+	const toplevel: *const c.wlr_xdg_toplevel = @ptrCast(data.?);
+	const T = @TypeOf(toplevel.base.data); // TODO hardcode instead
+	toplevel.base.data = ctx.gpa.create(T)
+		catch ctx.die("Failed to allocate memory!", .{});
+	const cl: *Client = toplevel.base.data;
+	cl.surface.xdg = toplevel.base;
+	cl.bw = ctx.borderpx;
+
+	ctx.listenWrapper(&toplevel.base.surface.events.commit, &cl.commit_lsr,     lsrs.items.commitNotify);
+	ctx.listenWrapper(&toplevel.base.surface.events.map,    &cl.map_lsr,        lsrs.items.mapNotify);
+	ctx.listenWrapper(&toplevel.base.surface.events.unmap,  &cl.unmap_lsr,      lsrs.items.unmapNotify);
+	ctx.listenWrapper(&toplevel.events.destroy,             &cl.destroy_lsr,    lsrs.items.destroyNotify);
+	ctx.listenWrapper(&toplevel.events.request_fullscreen,  &cl.fullscreen_lsr, lsrs.items.fullscreenNotify);
+	ctx.listenWrapper(&toplevel.events.request_maximize,    &cl.maximize_lsr,   lsrs.items.maximizeNotify);
+	ctx.listenWrapper(&toplevel.events.set_title,           &cl.set_title_lsr,  lsrs.items.updateTitle);
 }
 
 fn outputMgrApply(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
@@ -446,7 +464,15 @@ fn createNotifyX11(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	_ = data;
 }
 
-fn xwaylandReady(_: ?[*]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
-	// TODO
-	_ = data;
+fn xwaylandReady(_: ?[*]c.wl_listener, _: ?*anyopaque) callconv(.c) void {
+	c.wlr_xwayland_set_seat(ctx.xwayland, ctx.seat);
+	const xcursor: *const c.wlr_xcursor = c.wlr_xcursor_manager_get_xcursor(ctx.cursor_mgr, "default", 1)
+		orelse return;
+
+	const img = xcursor.images[0].*;
+	c.wlr_xwayland_set_cursor(
+		ctx.xwayland,
+		img.buffer, img.width * 4,
+		img.width, img.height,
+		img.hotspot_x, img.hotspot_y);
 }

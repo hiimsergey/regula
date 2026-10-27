@@ -6,7 +6,6 @@ const c = @import("c.zig").c;
 const lsrs = @import("listeners.zig");
 const userconfig = @import("userconfig.zig");
 
-const AllocatorWrapper = @import("AllocatorWrapper.zig");
 const Client = @import("Client.zig");
 const Monitor = @import("Monitor.zig");
 
@@ -21,10 +20,10 @@ pub const Layer = enum(u8) {
 	block,
 
 	pub const map = [_]u8{
-		@intFromEnum(Layer.background),
-		@intFromEnum(Layer.bottom),
-		@intFromEnum(Layer.top),
-		@intFromEnum(Layer.overlay)
+		@backingInt(Layer.background),
+		@backingInt(Layer.bottom),
+		@backingInt(Layer.top),
+		@backingInt(Layer.overlay)
 	};
 
 	const len = @typeInfo(Layer).@"enum".fields.len;
@@ -53,7 +52,7 @@ const KeyboardGroup = struct {
 		const keymap: *const c.xkb_keymap = c.xkb_keymap_new_from_names(ctx,
 			&userconfig.xkb_rules,
 			c.XKB_KEYMAP_COMPILE_NO_FLAGS)
-		orelse die("Failed to compile keymap!", .{}, 1);
+			orelse die("Failed to compile keymap!", .{}, 1);
 
 		c.wlr_keyboard_set_keymap(&group.interface.keyboard, keymap);
 		c.xkb_keymap_unref(keymap);
@@ -73,9 +72,9 @@ const KeyboardGroup = struct {
 		return group;
 	}
 
-	fn destroy(listener: ?*c.wl_listener, _: ?*anyopaque) void {
+	fn destroy(lsr: ?*c.wl_listener, _: ?*anyopaque) void {
 		var group: *const KeyboardGroup = undefined;
-		group = c.wl_container_of(listener, group, "destroy");
+		group = c.wl_container_of(lsr, group, "destroy");
 		c.wl_event_source_remove(group.key_repeat_source);
 		c.wl_list_remove(&group.key_lsr.link);
 		c.wl_list_remove(&group.modifiers_lsr.link);
@@ -105,7 +104,6 @@ const GrabClient = struct {
 	y: c_int
 };
 
-pub var aw: AllocatorWrapper = undefined;
 pub var gpa: std.mem.Allocator = undefined;
 
 pub var child_pid: linux.pid_t = -1;
@@ -161,7 +159,6 @@ pub var sel_monitor: ?*Monitor = undefined;
 pub var xwayland: if (config.xwayland) [*c]c.wlr_xwayland else void = undefined;
 
 pub fn init(proc_init: std.process.Init) !void {
-	aw = AllocatorWrapper.init();
 	gpa = proc_init.gpa;
 
 	// Reset signal handlers for SIGCHLD, SIGINT, SIGTERM and SIGPIPE
@@ -193,7 +190,7 @@ pub fn init(proc_init: std.process.Init) !void {
 	drag_icon = c.wlr_scene_tree_create(&scene.tree);
 	c.wlr_scene_node_place_below(
 		&drag_icon.node,
-		&layers[@intFromEnum(Layer.block)].node
+		&layers[@backingInt(Layer.block)].node
 	);
 
 	renderer = c.wlr_renderer_autocreate(backend) orelse {
@@ -270,7 +267,7 @@ pub fn init(proc_init: std.process.Init) !void {
 	c.wl_signal_add(&session_lock_mgr.events.new_lock, &lsrs.items.new_session_lock);
 
 	locked_bg = c.wlr_scene_rect_create(
-		layers[@intFromEnum(Layer.block)],
+		layers[@backingInt(Layer.block)],
 		screen_geom.width, screen_geom.height,
 		[_]f32{0.1, 0.1, 0.1, 1.0});
 	c.wlr_scene_node_set_enabled(&locked_bg.node, 0);
@@ -323,9 +320,7 @@ pub fn init(proc_init: std.process.Init) !void {
 }
 
 pub fn deinit() void {
-	aw.deinit();
-
-	lsrs.cleanup();
+	lsrs.deinit();
 	if (config.xwayland) {
 		c.wlr_xwayland_destroy(xwayland);
 		xwayland = null;
@@ -359,17 +354,17 @@ pub fn die(comptime fmt: []const u8, args: anytype, comptime stat: u8) noreturn 
 
 pub fn listenWrapper(
 	event: [*c]c.wl_signal,
-	listener: *c.wl_listener,
+	lsr: *c.wl_listener,
 	handler: fn ([*]c.wl_listener, ?*anyopaque) callconv(.c) void
 ) void {
-	listener.notify = handler;
-	c.wl_signal_add(event, @ptrCast(listener));
+	lsr.notify = handler;
+	c.wl_signal_add(event, @ptrCast(lsr));
 }
 
 fn handlesig(signo: i32) callconv(.c) void {
 	var idc: u32 = undefined;
-	if (signo == linux.SIG.CHLD)
+	if (signo == @backingInt(linux.SIG.CHLD))
 		while (linux.waitpid(-1, &idc, linux.W.NOHANG) > 0) {}
-	else if (signo == linux.SIG.INT or signo == linux.SIG.TERM)
+	else if (signo == @backingInt(linux.SIG.INT) or signo == @backingInt(linux.SIG.TERM))
 		c.wl_display_terminate(display);
 }

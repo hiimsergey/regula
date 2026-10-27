@@ -1,10 +1,32 @@
 const Build = @import("std").Build;
 
-// Latest Zig version as of writing this: 0.15.2
+// Latest Zig version as of writing this: 0.17.0
 pub fn build(b: *Build) void {
 	// Options
 	const target = b.standardTargetOptions(.{});
 	const optimize = b.standardOptimizeOption(.{});
+
+	const translate_c = b.addTranslateC(.{
+		.root_source_file = b.path("src/c.h"),
+		.target = target,
+		.optimize = optimize
+	});
+	// TODO NOW NOW figure out how to do the "if (config.xwayland)" part in
+	// c.zig
+
+	// Linking libraries
+	translate_c.linkSystemLibrary("wlroots-0.19", .{});
+	translate_c.linkSystemLibrary("wayland-server", .{});
+	translate_c.linkSystemLibrary("xkbcommon", .{});
+	translate_c.linkSystemLibrary("input", .{});
+	// XWayland
+	translate_c.linkSystemLibrary("xcb", .{});
+	translate_c.linkSystemLibrary("xcb-icccm", .{});
+
+	translate_c.addIncludePath(b.path("include"));
+	translate_c.addIncludePath(.{ .cwd_relative = "/usr/include/wlroots-0.19" });
+	translate_c.addIncludePath(.{ .cwd_relative = "/usr/include/pixman-1" });
+	translate_c.addIncludePath(.{ .cwd_relative = "/usr/include/libdrm" });
 
 	// Executable declaration
 	const exe = b.addExecutable(.{
@@ -13,22 +35,14 @@ pub fn build(b: *Build) void {
 			.root_source_file = b.path("src/main.zig"),
 			.target = target,
 			.optimize = optimize,
-			.link_libc = true
+			.imports = &.{
+				.{
+					.name = "c",
+					.module = translate_c.createModule()
+				}
+			}
 		})
 	});
-
-	// Linking libraries
-	exe.root_module.addIncludePath(b.path("include"));
-	exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/wlroots-0.19" });
-	exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/pixman-1" });
-	exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/libdrm" });
-	exe.root_module.linkSystemLibrary("wlroots-0.19", .{});
-	exe.root_module.linkSystemLibrary("wayland-server", .{});
-	exe.root_module.linkSystemLibrary("xkbcommon", .{});
-	exe.root_module.linkSystemLibrary("input", .{});
-	// XWayland
-	exe.root_module.linkSystemLibrary("xcb", .{});
-	exe.root_module.linkSystemLibrary("xcb-icccm", .{});
 
 	// User-defined options
 	const xwayland = b.option(

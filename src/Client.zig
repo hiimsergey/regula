@@ -3,16 +3,17 @@
 
 const config = @import("config");
 const std = @import("std");
-const linux = std.os.linux; // TODO CONSIDER
+const linux = std.os.linux;
 const c = @import("c.zig").c;
 const ctx = @import("globals.zig");
 
+const Client = @import("Client.zig");
 const LayerSurface = @import("LayerSurface.zig");
 const Monitor = @import("Monitor.zig");
 const Self = @This();
 
 // TODO CONSIDER
-pub const Type = enum(i8) {invalid = -1, xdg_shell, layer_shell, x11};
+pub const Kind = enum(i8) {invalid = -1, xdg_shell, layer_shell, x11};
 
 mon: ?*Monitor,
 scene: *c.wlr_scene_tree,
@@ -28,15 +29,15 @@ surface: union(enum) {
 	xwayland: *c.wlr_xwayland_surface
 },
 decoration: *c.wlr_xdg_toplevel_decoration_v1,
-commit: c.wl_listener,
-map: c.wl_listener,
-maximize: c.wl_listener,
-unmap: c.wl_listener,
-destroy: c.wl_listener,
-set_title: c.wl_listener,
-fullscreen: c.wl_listener,
-set_decoration_mode: c.wl_listener,
-destroy_decoration: c.wl_listener,
+commit_lsr: c.wl_listener,
+map_lsr: c.wl_listener,
+maximize_lsr: c.wl_listener,
+unmap_lsr: c.wl_listener,
+destroy_lsr: c.wl_listener,
+set_title_lsr: c.wl_listener,
+fullscreen_lsr: c.wl_listener,
+set_decoration_mode_lsr: c.wl_listener,
+destroy_decoration_lsr: c.wl_listener,
 
 bw: u32,
 tags: u32,
@@ -49,44 +50,64 @@ is: packed struct(u8) {
 resize_to: u32,
 
 xwayland: if (config.xwayland) struct {
-	activate: c.wl_listener,
-	associate: c.wl_listener,
-	dissociate: c.wl_listener,
-	configure: c.wl_listener,
-	set_hints: c.wl_listener,
-} else void,
+	activate_lsr: c.wl_listener,
+	associate_lsr: c.wl_listener,
+	dissociate_lsr: c.wl_listener,
+	configure_lsr: c.wl_listener,
+	set_hints_lsr: c.wl_listener,
+} else void = undefined,
 
-pub fn focus(self: *const Self, list: c_int) void {
-	// TODO CONSIDER change returntype
-	// TODO
-	_ = self;
-	_ = list;
+// TODO CONSIDER CHANGE lift's data type
+pub fn focus(self: ?*const Self, lift: c_int) void {
+	if (ctx.locked) return;
+
+	const old: *const c.wlr_surface = ctx.seat.keyboard_state.focused_surface;
+
+	if (self) |cl| {
+		if (lift != 0)
+			c.wlr_scene_node_raise_to_top(&self.scene.node);
+
+		const surf_ptr: @TypeOf(old) = switch (cl.surface) {
+			.xdg => @ptrCast(cl.surface.xdg),
+			.xwayland => @ptrCast(cl.surface.xwayland)
+		};
+		if (surf_ptr == old) return;
+	}
+
+	const old_cl: ?*const Client = null;
+	const old_lysurf: ?*const LayerSurface = null;
+	const old_cl_kind = c.toplevel_from_wlr_surface(old, &old_cl, &old_lysurf);
+	if (old_cl_kind == @backingInt(Kind.xdg_shell)) {
+		// TODO wl_list_for_each_safe(popup, tmp, &old_c->surface.xdg->popups, link)
+		// var pos = c.wl_container_of(&old_cl.?.surface.xdg.popups.next, ctx.pop TODO NOW NOW)
+		// TODO NOW NOW
+	}
 }
 
-pub fn notifyEnter(surface: *const c.wlr_surface, keyboard: ?*const c.wlr_keyboard) void {
+pub fn notifyEnter(surf: *const c.wlr_surface, keyboard: ?*const c.wlr_keyboard) void {
 	if (keyboard) |kb| {
 		c.wlr_seat_keyboard_notify_enter(
 			ctx.seat,
-			surface,
+			surf,
 			kb.keycodes, kb.num_keycodes, &kb.modifiers
 		);
 	} else {
-		c.wlr_seat_keyboard_notify_clear_focus(ctx.seat, surface, null, 0, null);
+		c.wlr_seat_keyboard_notify_clear_focus(ctx.seat, surf, null, 0, null);
 	}
 }
 
 pub fn toplevelFromWlrSurface(
-	sur: ?*c.wlr_surface,
+	surf: ?*c.wlr_surface,
 	cl_ptr: ?**const Self,
-	lysur_ptr: ?**const LayerSurface
-) Type {
-	var client_type = Type.invalid;
+	lysurf_ptr: ?**const LayerSurface
+) Kind {
+	var client_type = Kind.invalid;
 	var client: *Self = undefined;
 	var our_ls: *LayerSurface = undefined;
 
 	body: {
 		const root_surface: *c.wlr_surface =
-			c.wlr_surface_get_root_surface(sur orelse return .invalid);
+			c.wlr_surface_get_root_surface(surf orelse return .invalid);
 
 		if (config.xwayland) {
 			const xsurface: ?*c.wlr_xwayland_surface =
@@ -123,7 +144,7 @@ pub fn toplevelFromWlrSurface(
 						c.wlr_xdg_surface_try_from_wlr_surface(xdgsur.unnamed_0.popup.*.parent)
 					orelse return toplevelFromWlrSurface(
 						xdgsur.unnamed_0.popup.*.parent,
-						cl_ptr, lysur_ptr
+						cl_ptr, lysurf_ptr
 					);
 
 					xdgsur.* = tmp_xdgsur;
@@ -142,22 +163,22 @@ pub fn toplevelFromWlrSurface(
 		}
 	}
 
-	if (lysur_ptr) |pl| pl.* = our_ls;
+	if (lysurf_ptr) |pl| pl.* = our_ls;
 	if (cl_ptr) |pc| pc.* = client;
 
 	return client_type;
 }
 
-pub fn activateSurface(surface: [*c]c.wlr_surface, activated: bool) void {
+pub fn activateSurface(surf: [*c]c.wlr_surface, activated: bool) void {
 	if (config.xwayland) ifc: {
 		const xsurface: *const c.wlr_xwayland_surface =
-			c.wlr_xwayland_surface_try_from_wlr_surface(surface) orelse break :ifc;
+			c.wlr_xwayland_surface_try_from_wlr_surface(surf) orelse break :ifc;
 		c.wlr_xwayland_surface_activate(xsurface, activated);
 		return;
 	}
 
 	const toplevel: *const c.wlr_xdg_toplevel =
-		c.wlr_xdg_toplevel_try_from_wlr_surface(surface) orelse return;
+		c.wlr_xdg_toplevel_try_from_wlr_surface(surf) orelse return;
 	c.wlr_xdg_toplevel_set_activated(toplevel, activated);
 }
 
@@ -262,10 +283,10 @@ fn isFloatType(self: *const Self) bool {
 		(state.min_width == state.max_width or state.min_height == state.max_height));
 }
 
-fn isOnMonitor(self: *const Self, monitor: *const Monitor) bool {
+fn isOnMonitor(self: *const Self, mon: *const Monitor) bool {
 	// TODO
 	_ = self;
-	_ = monitor;
+	_ = mon;
 }
 
 fn isStopped(self: *const Self) bool {
@@ -292,8 +313,6 @@ fn isUnmanaged(self: *const Self) bool {
 		self.surface.xwayland.override_redirect
 		else false;
 }
-
-// TODO NOW NOW
 
 pub fn visibleOn(self: *const Self, mon: ?*const Monitor) bool {
 	return mon != null and self.mon == mon and

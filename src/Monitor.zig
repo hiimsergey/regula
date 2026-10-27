@@ -51,18 +51,15 @@ pub const rules = [_]Rule{
 	}
 };
 
-pub fn focusTop(self: *const Self) ?*const Client {
-	const client: *const Client = undefined;
-	_ = client; // TODO
-	_ = self; // TODO
-	// TODO wl_list_for_each
-	return null;
+pub fn fromXY(x: f64, y: f64) ?*Self {
+	const output: *c.wlr_output = c.wlr_output_layout_output_at(ctx.output_layout, x, y) orelse return null;
+	return output.data;
 }
 
-fn topmostClient(self: *const Self) ?*Client {
+pub fn topmostClient(self: *const Self) ?*const Client {
 	var cl: *Client = undefined;
-	cl = c.wl_container_of(ctx.fstack.next, cl, "flink");
-	while (&cl.flink != &ctx.fstack) :
+	cl = c.wl_container_of(ctx.focus_stack.next, cl, "flink");
+	while (&cl.flink != &ctx.focus_stack) :
 		(cl = c.wl_container_of(cl.flink.next, cl, "flink"))
 	{
 		if (cl.visibleOn(self)) return cl;

@@ -24,7 +24,7 @@ pub const version = "0.0.0";
 pub fn main(init: std.process.Init) u8 {
 	if (handleArgs()) |stat| return stat;
 
-	ctx.init(init.gpa) catch return 1;
+	ctx.init(init) catch return 1;
 	defer ctx.deinit();
 
 	const xdg_runtime_dir_set: bool = std.process.hasEnvVar(ctx.gpa, "XDG_RUNTIME_DIR")
