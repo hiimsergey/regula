@@ -1,7 +1,8 @@
+const c = @import("c");
 const std = @import("std");
 const log = std.log;
-const c = @import("c.zig").c;
 const ctx = @import("globals.zig");
+const Io = std.Io;
 
 // TODO NOW CONSIDER ALL REPLACE wl_list with std linked list or arraylist
 
@@ -22,17 +23,12 @@ pub const help_text =
 pub const version = "0.0.0";
 
 pub fn main(init: std.process.Init) u8 {
-	if (handleArgs()) |stat| return stat;
+	if (handleArgs(init.minimal.args)) |stat| return stat;
 
 	ctx.init(init) catch return 1;
 	defer ctx.deinit();
 
-	const xdg_runtime_dir_set: bool = std.process.hasEnvVar(ctx.gpa, "XDG_RUNTIME_DIR")
-	catch |e| switch (e) {
-		error.InvalidWtf8 => unreachable,
-		error.OutOfMemory => return 12
-	};
-	if (!xdg_runtime_dir_set) {
+	if (!init.environ_map.contains("XDG_RUNTIME_DIR")) {
 		log.err("Environment variable XDG_RUNTIME_DIR must be set!", .{});
 		return 1;
 	}
@@ -42,10 +38,10 @@ pub fn main(init: std.process.Init) u8 {
 
 /// Returns error code the compositor should exit with or null if it should keep
 /// running.
-fn handleArgs() ?u8 {
-	var args = std.process.args();
-	_ = args.skip(); // Skip executable name
-	const flag = args.next() orelse return null;
+fn handleArgs(args: std.process.Args) ?u8 {
+	var it = args.iterate();
+	_ = it.skip(); // Skip executable name
+	const flag = it.next() orelse return null;
 
 	if (std.mem.eql(u8, flag, "--startup") or std.mem.eql(u8, flag, "-s")) {
 		// TODO
@@ -66,7 +62,7 @@ fn handleArgs() ?u8 {
 
 /// Single unbuffered print through stdout without formatting arguments
 fn stdoutPrint(comptime msg: []const u8) void {
-	var stdout_wrapper = std.fs.File.stdout().writer(&.{});
+	var stdout_wrapper = std.Io.File.stdout().writer(ctx.io, &.{});
 	stdout_wrapper.interface.print(msg, .{}) catch {};
 }
 

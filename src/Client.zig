@@ -1,10 +1,10 @@
 // TODO FINAL FIX pub and private fn decls
 // TODO FINAL FIX inline and not-inline fn decls
 
+const c = @import("c");
 const config = @import("config");
 const std = @import("std");
 const linux = std.os.linux;
-const c = @import("c.zig").c;
 const ctx = @import("globals.zig");
 
 const Client = @import("Client.zig");
@@ -17,7 +17,7 @@ pub const Kind = enum(i8) {invalid = -1, xdg_shell, layer_shell, x11};
 
 mon: ?*Monitor,
 scene: *c.wlr_scene_tree,
-border: [4]*c.wlr_scene_rect, // top, bottom, left, right
+border: [4]*c.wlr_scene_rect, // top, bottom, left, right // TODO CONSIDER using enum instead
 scene_surface: *c.wlr_scene_tree,
 link: c.wl_list,
 flink: c.wl_list,
@@ -57,26 +57,24 @@ xwayland: if (config.xwayland) struct {
 	set_hints_lsr: c.wl_listener,
 } else void = undefined,
 
-// TODO CONSIDER CHANGE lift's data type
-pub fn focus(self: ?*const Self, lift: c_int) void {
-	if (ctx.locked) return;
+pub fn focus(self: ?*const Self, lift: bool) void {
+	if (ctx.is_locked) return;
 
-	const old: *const c.wlr_surface = ctx.seat.keyboard_state.focused_surface;
+	const old_surf: *const c.wlr_surface = ctx.seat.keyboard_state.focused_surface;
 
 	if (self) |cl| {
-		if (lift != 0)
-			c.wlr_scene_node_raise_to_top(&self.scene.node);
+		if (lift) c.wlr_scene_node_raise_to_top(&self.?.scene.node);
 
-		const surf_ptr: @TypeOf(old) = switch (cl.surface) {
+		const surf_ptr: @TypeOf(old_surf) = switch (cl.surface) {
 			.xdg => @ptrCast(cl.surface.xdg),
 			.xwayland => @ptrCast(cl.surface.xwayland)
 		};
-		if (surf_ptr == old) return;
+		if (surf_ptr == old_surf) return;
 	}
 
 	const old_cl: ?*const Client = null;
 	const old_lysurf: ?*const LayerSurface = null;
-	const old_cl_kind = c.toplevel_from_wlr_surface(old, &old_cl, &old_lysurf);
+	const old_cl_kind = toplevelFromWlrSurface(old_surf, &old_cl, &old_lysurf);
 	if (old_cl_kind == @backingInt(Kind.xdg_shell)) {
 		// TODO wl_list_for_each_safe(popup, tmp, &old_c->surface.xdg->popups, link)
 		// var pos = c.wl_container_of(&old_cl.?.surface.xdg.popups.next, ctx.pop TODO NOW NOW)
@@ -84,16 +82,17 @@ pub fn focus(self: ?*const Self, lift: c_int) void {
 	}
 }
 
-pub fn notifyEnter(surf: *const c.wlr_surface, keyboard: ?*const c.wlr_keyboard) void {
+pub fn notifyEnter(surf: [*]c.wlr_surface, keyboard: ?*const c.wlr_keyboard) void {
 	if (keyboard) |kb| {
 		c.wlr_seat_keyboard_notify_enter(
 			ctx.seat,
 			surf,
-			kb.keycodes, kb.num_keycodes, &kb.modifiers
-		);
-	} else {
-		c.wlr_seat_keyboard_notify_clear_focus(ctx.seat, surf, null, 0, null);
+			&kb.keycodes, kb.num_keycodes, &kb.modifiers);
+		return;
 	}
+
+	// TODO
+	c.wlr_seat_keyboard_notify_enter(ctx.seat, surf, null, 0, null);
 }
 
 pub fn toplevelFromWlrSurface(
@@ -101,7 +100,7 @@ pub fn toplevelFromWlrSurface(
 	cl_ptr: ?**const Self,
 	lysurf_ptr: ?**const LayerSurface
 ) Kind {
-	var client_type = Kind.invalid;
+	var client_kind = Kind.invalid;
 	var client: *Self = undefined;
 	var our_ls: *LayerSurface = undefined;
 
@@ -114,7 +113,7 @@ pub fn toplevelFromWlrSurface(
 				c.wlr_xwayland_surface_try_from_wlr_surface(root_surface);
 			if (@intFromPtr(xsurface) != 0) {
 				client = @alignCast(@ptrCast(xsurface.?.*.data.?));
-				client_type = switch (client.surface) {
+				client_kind = switch (client.surface) {
 					.xdg => .xdg_shell,
 					.xwayland => .x11
 				};
@@ -126,32 +125,31 @@ pub fn toplevelFromWlrSurface(
 			c.wlr_layer_surface_v1_try_from_wlr_surface(root_surface);
 		if (@intFromPtr(layer_surface) != 0) {
 			our_ls = @alignCast(@ptrCast(layer_surface.?.*.data.?));
-			client_type = .layer_shell;
+			client_kind = .layer_shell;
 			break :body;
 		}
 
-		const xdg_surface: ?*c.wlr_xdg_surface =
+		var xdg_surface: ?*c.wlr_xdg_surface =
 			c.wlr_xdg_surface_try_from_wlr_surface(root_surface);
-		while (xdg_surface) |*xdgsur| {
-			var tmp_xdgsur: ?*c.wlr_xdg_surface = null;
-			switch (xdgsur.role) {
+		while (xdg_surface) |*xdgsurf| {
+			var tmp_xdgsurf: *c.wlr_xdg_surface = undefined;
+			switch (xdgsurf.*.role) {
 				c.WLR_XDG_SURFACE_ROLE_POPUP => {
-					if (xdgsur.unnamed_0.popup == null or
-						xdgsur.unnamed_0.popup.*.parent == null)
+					if (xdgsurf.*.unnamed_0.popup == null or
+						xdgsurf.*.unnamed_0.popup.*.parent == null)
 						return .invalid;
 
-					tmp_xdgsur =
-						c.wlr_xdg_surface_try_from_wlr_surface(xdgsur.unnamed_0.popup.*.parent)
+					tmp_xdgsurf = c.wlr_xdg_surface_try_from_wlr_surface(
+						xdgsurf.*.unnamed_0.popup.*.parent)
 					orelse return toplevelFromWlrSurface(
-						xdgsur.unnamed_0.popup.*.parent,
-						cl_ptr, lysurf_ptr
-					);
+						xdgsurf.*.unnamed_0.popup.*.parent,
+						cl_ptr, lysurf_ptr);
 
-					xdgsur.* = tmp_xdgsur;
+					xdgsurf.* = tmp_xdgsurf;
 				},
 				c.WLR_XDG_SURFACE_ROLE_TOPLEVEL => {
-					client = @ptrCast(xdgsur.data);
-					client_type = switch (client.surface) {
+					client = @alignCast(@ptrCast(xdgsurf.*.data));
+					client_kind = switch (client.surface) {
 						.xdg => .xdg_shell,
 						.xwayland => .x11
 					};
@@ -166,29 +164,33 @@ pub fn toplevelFromWlrSurface(
 	if (lysurf_ptr) |pl| pl.* = our_ls;
 	if (cl_ptr) |pc| pc.* = client;
 
-	return client_type;
+	return client_kind;
 }
 
 pub fn activateSurface(surf: [*c]c.wlr_surface, activated: bool) void {
 	if (config.xwayland) ifc: {
-		const xsurface: *const c.wlr_xwayland_surface =
+		const xsurface: [*]c.wlr_xwayland_surface =
 			c.wlr_xwayland_surface_try_from_wlr_surface(surf) orelse break :ifc;
 		c.wlr_xwayland_surface_activate(xsurface, activated);
 		return;
 	}
 
-	const toplevel: *const c.wlr_xdg_toplevel =
+	const toplevel: [*]c.wlr_xdg_toplevel =
 		c.wlr_xdg_toplevel_try_from_wlr_surface(surf) orelse return;
-	c.wlr_xdg_toplevel_set_activated(toplevel, activated);
+	_ = c.wlr_xdg_toplevel_set_activated(toplevel, activated); // TODO CONSIDER ERRHANDLE
 }
 
-fn setBounds(self: *const Self, w: i32, h: i32) u32 {
+fn setBounds(self: *Self, w: i32, h: i32) u32 {
 	if (config.xwayland and self.surface == .xwayland) return 0;
 
-	if (c.wl_resource_get_version(self.surface.xdg.unnamed_0.toplevel.*.resource) <
-		c.XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION or w < 0 or h < 0 or
-		(self.bounds.width == w and self.bounds.height == h))
+	if (c.wl_resource_get_version(self.surface.xdg.unnamed_0.toplevel.*.resource)
+		< c.XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION
+		or w < 0
+		or h < 0
+		or (self.bounds.width == w and self.bounds.height == h))
+	{
 		return 0;
+	}
 
 	self.bounds.width = w;
 	self.bounds.height = h;
@@ -293,17 +295,20 @@ fn isStopped(self: *const Self) bool {
 	if (config.xwayland and self.surface == .xwayland) return false;
 
 	var pid: c_int = undefined;
-	var in = std.mem.zeroes(linux.siginfo_t);
+	var info = std.mem.zeroes(linux.siginfo_t);
 	const flag = linux.W.NOHANG | linux.W.CONTINUED | linux.W.STOPPED | linux.W.NOWAIT;
 	c.wl_client_get_credentials(self.surface.xdg.client, &pid, null, null);
-	if (linux.waitpid(linux.P.PID, pid, &in, flag) < 0) {
+	if (linux.waitpid(linux.P.PID, pid, &info, flag) < 0) {
 		// This process is not our child process, while is very unlikely that
 		// it is stopped, in order to do not skip frames, assume that it is.
 		const errno = std.posix.errno(-1);
 		if (errno == .ECHILD) return true;
 	}
-	else if (in.si_pid and
-		(in.si_code == linux.W.STOPPED or in.si_code == linux.W.TRAPPED)) return true;
+	else if (info.si_pid and
+		(info.si_code == linux.W.STOPPED or info.si_code == linux.W.TRAPPED))
+	{
+		return true;
+	}
 
 	return false;
 }
@@ -315,11 +320,13 @@ fn isUnmanaged(self: *const Self) bool {
 }
 
 pub fn visibleOn(self: *const Self, mon: ?*const Monitor) bool {
-	return mon != null and self.mon == mon and
-		(self.tags & mon.?.tagset[mon.?.seltags]) == 1;
+	return mon != null
+		and self.mon == mon
+		and (self.tags & mon.?.tagset[mon.?.seltags]) == 1;
 }
 
-pub fn resize(self: *const Self, geom: c.wlr_box, interact: bool) void {
+pub fn resize(self: *Self, geom: c.wlr_box, interact: bool) void {
+	// v TODO CONSIDER optimize
 	const mapped: bool = switch (self.surface) {
 		.xdg => |surf| surf.surface.*.mapped,
 		.xwayland => |surf| surf.surface.*.mapped
@@ -328,7 +335,7 @@ pub fn resize(self: *const Self, geom: c.wlr_box, interact: bool) void {
 
 	const bbox: *const c.wlr_box = if (interact) &ctx.screen_geom else &self.mon.?.window;
 
-	self.setBounds(geom.width, geom.height);
+	_ = self.setBounds(geom.width, geom.height);
 	self.geom = geom;
 	self.applyBounds(bbox);
 
@@ -352,7 +359,7 @@ pub fn resize(self: *const Self, geom: c.wlr_box, interact: bool) void {
 	c.wlr_scene_subsurface_tree_set_clip(&self.scene_surface.node, &clip);
 }
 
-fn applyBounds(self: *const Self, bbox: *const c.wlr_box) void {
+fn applyBounds(self: *Self, bbox: *const c.wlr_box) void {
 	self.geom.width = @max(1 + 2 * self.bw, self.geom.width);
 	self.geom.height = @max(1 + 2 * self.bw, self.geom.height);
 
@@ -375,8 +382,7 @@ fn setSize(self: *const Self, w: u32, h: u32) u32 {
 		c.wlr_xwayland_surface_configure(
 			self.surface.xwayland,
 			self.geom.x + self.bw, self.geom.y + self.bw,
-			w, h
-		);
+			w, h);
 		return 0;
 	}
 	if (w == self.surface.xdg.unnamed_0.toplevel.*.current.width and

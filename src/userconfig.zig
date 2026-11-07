@@ -1,10 +1,13 @@
 // TODO either turn this into a proper config file or distribute constants across other files
 
+const c = @import("c");
 const std = @import("std");
-const c = @import("c.zig").c;
 const ctx = @import("globals.zig");
 
 const Monitor = @import("Monitor.zig");
+
+/// Cursor size in pixels
+pub const cursor_size = 24;
 
 pub const fullscreen_bg = color(0x18_18_18_ff);
 
@@ -13,6 +16,9 @@ pub const root_color = color(0x22_22_22_ff);
 
 /// Border color for urgent windows
 pub const urgent_color = color(0xff_00_00_ff);
+
+/// Border pixel of windows
+pub const border_pixel: u32 = 1;
 
 /// Keyboard configuration
 pub const xkb_rules = c.xkb_rule_names{

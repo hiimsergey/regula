@@ -1,4 +1,4 @@
-const c = @import("c.zig").c;
+const c = @import("c");
 
 const Client = @import("Client.zig");
 const Monitor = @import("Monitor.zig");

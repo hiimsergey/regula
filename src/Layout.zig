@@ -1,4 +1,4 @@
-const c = @import("c.zig").c;
+const c = @import("c");
 const ctx = @import("globals.zig");
 const Client = @import("Client.zig");
 const Monitor = @import("Monitor.zig");
@@ -10,13 +10,12 @@ arrangeFn: ?*const fn (*Monitor) void,
 pub const arrange = struct {
 	fn monocle(mon: *const Monitor) void {
 		// TODO ALL CONSIDER REPLACEWITH iterator
-		var cl: *const Client = undefined;
-		cl = c.wl_container_of(ctx.clients.next, cl, "link");
+		var cl: *Client = @fieldParentPtr("link", &ctx.clients.next.*);
 		while (&cl.link != &ctx.clients) :
-			(cl = c.wl_container_of(cl.link.next, cl, "link"))
+			(cl = @fieldParentPtr("link", &cl.link.next.*))
 		{
-			if (!cl.visibleOn(mon) or cl.is_floating or c.is_fullscreen) continue;
-			cl.resize(mon.w, false);
+			if (!cl.visibleOn(mon) or cl.is.floating or cl.is.fullscreen) continue;
+			cl.resize(mon.window, false);
 		}
 
 		cl = mon.topmostClient() orelse return;
@@ -24,14 +23,13 @@ pub const arrange = struct {
 	}
 
 	fn tile(mon: *const Monitor) void {
-		var cl: *Client = undefined;
-
+		var cl: *Client = @fieldParentPtr("link", &ctx.clients.next.*);
 		var n: usize = 0;
-		cl = c.wl_container_of(ctx.clients.next, cl, "link");
+
 		while (&cl.link != &ctx.clients) :
-			(cl = c.wl_container_of(cl.link.next, cl, "link"))
+			(cl = @fieldParentPtr("link", &cl.link.next.*))
 		{
-			if (cl.visibleOn(mon) and !cl.is_floating and !c.is_fullscreen) n += 1;
+			if (cl.visibleOn(mon) and !cl.is.floating and !cl.is.fullscreen) n += 1;
 		}
 		if (n == 0) return;
 
@@ -42,12 +40,12 @@ pub const arrange = struct {
 		var i: u32 = 0;
 		var my: u32 = 0;
 		var ty: u32 = 0;
-		cl = c.wl_container_of(ctx.clients.next, cl, "link");
+		cl = @fieldParentPtr("link", &ctx.clients.next.*);
 		while (&cl.link != &ctx.clients) : ({
-			cl = c.wl_container_of(cl.link.next, cl, "link");
+			cl = @fieldParentPtr("link", &cl.link.next.*);
 			i += 1;
 		}) {
-			if (!cl.visibleOn(mon) or cl.is_floating or cl.is_fullscreen) continue;
+			if (!cl.visibleOn(mon) or cl.is.floating or cl.is.fullscreen) continue;
 			if (i < mon.master_n) {
 				cl.resize(.{
 					.x = mon.window.x,

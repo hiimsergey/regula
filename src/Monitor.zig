@@ -1,10 +1,11 @@
-const c = @import("c.zig").c;
+const c = @import("c");
 const ctx = @import("globals.zig");
 
 const Client = @import("Client.zig");
 const Layout = @import("Layout.zig");
 const Self = @This();
 
+// TODO CONSIDER REPLACE wl_list with ArrayList or LinkedList
 link: c.wl_list,
 output: *c.wlr_output,
 scene_output: *c.wlr_scene_output,
@@ -56,11 +57,11 @@ pub fn fromXY(x: f64, y: f64) ?*Self {
 	return output.data;
 }
 
-pub fn topmostClient(self: *const Self) ?*const Client {
-	var cl: *Client = undefined;
-	cl = c.wl_container_of(ctx.focus_stack.next, cl, "flink");
+pub fn topmostClient(self: *const Self) ?*Client {
+	var cl: *Client = @fieldParentPtr("flink", &ctx.focus_stack.next.*);
 	while (&cl.flink != &ctx.focus_stack) :
-		(cl = c.wl_container_of(cl.flink.next, cl, "flink"))
+		(cl = @fieldParentPtr("flink", &cl.flink.next.*))
+		// TODO verify ^
 	{
 		if (cl.visibleOn(self)) return cl;
 	}

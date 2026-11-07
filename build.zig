@@ -11,8 +11,6 @@ pub fn build(b: *Build) void {
 		.target = target,
 		.optimize = optimize
 	});
-	// TODO NOW NOW figure out how to do the "if (config.xwayland)" part in
-	// c.zig
 
 	// Linking libraries
 	translate_c.linkSystemLibrary("wlroots-0.19", .{});
@@ -49,6 +47,8 @@ pub fn build(b: *Build) void {
 		bool,
 		"xwayland", "Compile with XWayland support (default: true)"
 	) orelse true;
+
+	if (xwayland) translate_c.addCFlags(&.{"-DUSE_XWAYLAND"});
 
 	const options = b.addOptions();
 	options.addOption(bool, "xwayland", xwayland);
