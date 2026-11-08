@@ -2,16 +2,13 @@ const c = @import("c");
 const std = @import("std");
 const log = std.log;
 const ctx = @import("globals.zig");
-const Io = std.Io;
-
-// TODO NOW CONSIDER ALL REPLACE wl_list with std linked list or arraylist
 
 pub const help_text =
 	\\RegulaWM - an extensible Wayland compositor with sane defaults
 	\\
 	\\Options:
 	\\  -h, --help           print this message and quit
-	\\  -s, --startup <cmd>  run the following args as an initial command
+	\\  -s, --startup <cmd>  run following args as initial command
 	\\  -v, --version        print version and quit
 	\\
 	\\Exit codes:
@@ -48,22 +45,16 @@ fn handleArgs(args: std.process.Args) ?u8 {
 		return 0;
 	}
 	else if (std.mem.eql(u8, flag, "--help") or std.mem.eql(u8, flag, "-h")) {
-		stdoutPrint(help_text);
+		log.info(help_text, .{});
 		return 0;
 	}
 	else if (std.mem.eql(u8, flag, "--version") or std.mem.eql(u8, flag, "-v")) {
-		stdoutPrint(version);
+		log.info(version, .{});
 		return 0;
 	}
 
 	log.err("Invalid flag '{s}'! See `regula --help` for correct usage!", .{flag});
 	return 1;
-}
-
-/// Single unbuffered print through stdout without formatting arguments
-fn stdoutPrint(comptime msg: []const u8) void {
-	var stdout_wrapper = std.Io.File.stdout().writer(ctx.io, &.{});
-	stdout_wrapper.interface.print(msg, .{}) catch {};
 }
 
 // TODO FINAL ALL move variable declarations as close as possible to their use

@@ -33,13 +33,15 @@ pub const arrange = struct {
 		}
 		if (n == 0) return;
 
-		const mw: u32 = if (n > mon.master_n)
-			if (mon.master_n > 0) @round(mon.window.width * mon.mfact) else 0
-			else mon.window.width;
+		const mw: c_int = if (n > mon.master_n) mw: {
+			if (mon.master_n == 0) break :mw 0;
+			const mon_w: f32 = @floatFromInt(mon.window.width);
+			break :mw @round(mon_w * mon.mfact);
+		} else mon.window.width;
 
-		var i: u32 = 0;
-		var my: u32 = 0;
-		var ty: u32 = 0;
+		var i: c_int = 0;
+		var my: c_int = 0;
+		var ty: c_int = 0;
 		cl = @fieldParentPtr("link", &ctx.clients.next.*);
 		while (&cl.link != &ctx.clients) : ({
 			cl = @fieldParentPtr("link", &cl.link.next.*);
@@ -51,7 +53,8 @@ pub const arrange = struct {
 					.x = mon.window.x,
 					.y = mon.window.y,
 					.width = mw,
-					.height = @divFloor(mon.window.height - my, @min(n, mon.master_n) - i)
+					.height = @divFloor(mon.window.height - my,
+						@as(c_int, @intCast(@min(n, mon.master_n))) - i)
 				}, false);
 				my = cl.geom.height;
 			} else {
@@ -59,7 +62,7 @@ pub const arrange = struct {
 					.x = mon.window.x + mw,
 					.y = mon.window.y + ty,
 					.width = mon.window.width - mw,
-					.height = @divFloor(mon.window.height - ty, n - i)
+					.height = @divFloor(mon.window.height - ty, @as(c_int, @intCast(n)) - i)
 				}, false);
 				ty = cl.geom.height;
 			}

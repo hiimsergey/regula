@@ -37,7 +37,7 @@ const KeyboardGroup = struct {
 	n_symbols: c_int,
 	key_symbols: *const c.xkb_keysym_t,
 	mods: u32,
-	key_repeat_source: *const c.wl_event_source,
+	key_repeat_source: *c.wl_event_source,
 
 	modifiers_lsr: c.wl_listener,
 	key_lsr: c.wl_listener,
@@ -76,13 +76,13 @@ const KeyboardGroup = struct {
 	}
 
 	fn destroy(lsr: ?*c.wl_listener, _: ?*anyopaque) void {
-		var group: *const KeyboardGroup = @fieldParentPtr("destroy_lsr", &lsr.*);
-		c.wl_event_source_remove(group.key_repeat_source);
-		c.wl_list_remove(&group.key_lsr.link);
-		c.wl_list_remove(&group.modifiers_lsr.link);
-		c.wl_list_remove(&group.destroy_lsr.link);
+		var group: *KeyboardGroup = @fieldParentPtr("destroy_lsr", lsr.?);
+		_ = c.wl_event_source_remove(group.key_repeat_source);
+		c.wl_list_remove(@ptrCast(&group.key_lsr.link));
+		c.wl_list_remove(@ptrCast(&group.modifiers_lsr.link));
+		c.wl_list_remove(@ptrCast(&group.destroy_lsr.link));
 		c.wlr_keyboard_group_destroy(group.interface);
-		gpa.free(group);
+		gpa.destroy(group);
 	}
 };
 
@@ -172,12 +172,8 @@ pub fn init(proc_init: std.process.Init) !void {
 		.mask = linux.sigemptyset()
 	};
 
-	inline for (&.{
-		linux.SIG.CHLD,
-		linux.SIG.INT,
-		linux.SIG.TERM,
-		linux.SIG.PIPE,
-	}) |sig| _ = linux.sigaction(sig, &sa, null);
+	inline for (&.{linux.SIG.CHLD, linux.SIG.INT, linux.SIG.TERM, linux.SIG.PIPE}) |sig|
+		_ = linux.sigaction(sig, &sa, null);
 
 	c.wlr_log_init(c.WLR_ERROR, null);
 
@@ -207,7 +203,7 @@ pub fn init(proc_init: std.process.Init) !void {
 	_ = c.wlr_renderer_init_wl_shm(renderer, display);
 
 	const tex_fmts = c.wlr_renderer_get_texture_formats(
-		@alignCast(@ptrCast(display)),
+		@alignCast(@ptrCast(renderer)),
 		c.WLR_BUFFER_CAP_DMABUF);
 	if (@intFromPtr(tex_fmts) != 0x0) {
 		_ = c.wlr_drm_create(display, renderer);
@@ -278,6 +274,7 @@ pub fn init(proc_init: std.process.Init) !void {
 	session_lock_mgr = c.wlr_session_lock_manager_v1_create(display);
 	c.wl_signal_add(&session_lock_mgr.events.new_lock, &lsrs.items.new_session_lock);
 
+	// TODO NOW NOW DEBUG geometry assertion fails here
 	locked_bg = c.wlr_scene_rect_create(
 		layers[@backingInt(Layer.block)],
 		screen_geom.width, screen_geom.height,

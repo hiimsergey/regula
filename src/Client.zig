@@ -39,7 +39,7 @@ fullscreen_lsr: c.wl_listener,
 set_decoration_mode_lsr: c.wl_listener,
 destroy_decoration_lsr: c.wl_listener,
 
-bw: u32,
+bw: c_int,
 tags: u32,
 is: packed struct(u8) {
 	floating: bool,
@@ -60,7 +60,7 @@ xwayland: if (config.xwayland) struct {
 pub fn focus(self: ?*const Self, lift: bool) void {
 	if (ctx.is_locked) return;
 
-	const old_surf: *const c.wlr_surface = ctx.seat.keyboard_state.focused_surface;
+	const old_surf: *c.wlr_surface = ctx.seat.keyboard_state.focused_surface;
 
 	if (self) |cl| {
 		if (lift) c.wlr_scene_node_raise_to_top(&self.?.scene.node);
@@ -72,10 +72,10 @@ pub fn focus(self: ?*const Self, lift: bool) void {
 		if (surf_ptr == old_surf) return;
 	}
 
-	const old_cl: ?*const Client = null;
-	const old_lysurf: ?*const LayerSurface = null;
-	const old_cl_kind = toplevelFromWlrSurface(old_surf, &old_cl, &old_lysurf);
-	if (old_cl_kind == @backingInt(Kind.xdg_shell)) {
+	var old_cl: *const Client = undefined;
+	var old_lysurf: *const LayerSurface = undefined;
+	const old_cl_kind: Kind = toplevelFromWlrSurface(old_surf, &old_cl, &old_lysurf);
+	if (old_cl_kind == .xdg_shell) {
 		// TODO wl_list_for_each_safe(popup, tmp, &old_c->surface.xdg->popups, link)
 		// var pos = c.wl_container_of(&old_cl.?.surface.xdg.popups.next, ctx.pop TODO NOW NOW)
 		// TODO NOW NOW
@@ -205,7 +205,7 @@ fn getAppId(self: *const Self) [*]const u8 {
 }
 
 fn getClip(self: *const Self) c.wlr_box {
-	var result = self.wlr_box{
+	var result = c.wlr_box{
 		.x = 0, .y = 0,
 		.width = self.geom.width - self.bw,
 		.height = self.geom.height - self.bw,
@@ -377,12 +377,13 @@ fn setBorderColor(self: *const Self, color: [4]f32) void {
 	inline for (0..4) |i| c.wlr_scene_rect_set_color(self.border[i], color);
 }
 
-fn setSize(self: *const Self, w: u32, h: u32) u32 {
+fn setSize(self: *const Self, w: c_int, h: c_int) u32 {
 	if (config.xwayland and self.surface == .xwayland) {
 		c.wlr_xwayland_surface_configure(
 			self.surface.xwayland,
-			self.geom.x + self.bw, self.geom.y + self.bw,
-			w, h);
+			@intCast(self.geom.x + self.bw),
+			@intCast(self.geom.y + self.bw),
+			@intCast(w), @intCast(h));
 		return 0;
 	}
 	if (w == self.surface.xdg.unnamed_0.toplevel.*.current.width and
