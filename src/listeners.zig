@@ -68,8 +68,10 @@ const list = std.StaticStringMap(c.wl_notify_func_t).initComptime(.{
 } else .{});
 
 pub fn deinit() void {
+	// TODO CONSIDER OPTIMIZE
 	inline for (@typeInfo(ListenerList).@"struct".field_names) |field_name| {
-		var lsr: c.wl_listener = @field(items, field_name);
+		// TODO CONSIDER referencing here
+		var lsr: *c.wl_listener = &@field(items, field_name);
 		c.wl_list_remove(@ptrCast(&lsr.link));
 	}
 	if (config.xwayland) {
@@ -278,28 +280,28 @@ fn createLayerSurface(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void
 		// TODO CONSIDER outsourcing this error message
 		// TODO ...and error code
 		catch ctx.die("Failed to allocate memory!", .{}, 12);
-	var ls: *LayerSurface = @alignCast(@ptrCast(layer_surface.data));
-	ls.kind = .layer_shell;
+	var lysurf: *LayerSurface = @alignCast(@ptrCast(layer_surface.data));
+	lysurf.kind = .layer_shell;
 
-	ctx.listenWrapper(&surface.events.commit, &ls.surface_commit, &commitLayerSurfaceNotify);
-	ctx.listenWrapper(&surface.events.unmap, &ls.unmap, &unmapLayerSurfaceNotify);
-	ctx.listenWrapper(&layer_surface.events.destroy, &ls.destroy, &destroyLayerSurfaceNotify);
+	ctx.listenWrapper(&surface.events.commit, &lysurf.surface_commit, &commitLayerSurfaceNotify);
+	ctx.listenWrapper(&surface.events.unmap, &lysurf.unmap, &unmapLayerSurfaceNotify);
+	ctx.listenWrapper(&layer_surface.events.destroy, &lysurf.destroy, &destroyLayerSurfaceNotify);
 
-	ls.layer_surface = layer_surface;
-	ls.monitor = @alignCast(@ptrCast(layer_surface.output.*.data));
-	ls.scene_layer = c.wlr_scene_layer_surface_v1_create(scene_layer, layer_surface);
-	ls.scene = ls.scene_layer.tree;
+	lysurf.layer_surface = layer_surface;
+	lysurf.monitor = @alignCast(@ptrCast(layer_surface.output.*.data));
+	lysurf.scene_layer = c.wlr_scene_layer_surface_v1_create(scene_layer, layer_surface);
+	lysurf.scene = lysurf.scene_layer.tree;
 
 	surface.data = c.wlr_scene_tree_create(
 		if (layer_surface.current.layer < c.ZWLR_LAYER_SHELL_V1_LAYER_TOP)
 			ctx.layers[@backingInt(ctx.Layer.top)]
 		else scene_layer
 	);
-	ls.popups = @alignCast(@ptrCast(surface.data.?));
-	ls.popups.node.data = ls;
-	ls.scene.node.data = ls;
+	lysurf.popups = @alignCast(@ptrCast(surface.data.?));
+	lysurf.popups.node.data = lysurf;
+	lysurf.scene.node.data = lysurf;
 
-	c.wl_list_insert(&ls.monitor.layers[layer_surface.pending.layer], &ls.link);
+	c.wl_list_insert(&lysurf.monitor.layers[layer_surface.pending.layer], &lysurf.link);
 	c.wlr_surface_send_enter(surface, layer_surface.output);
 }
 
@@ -352,7 +354,6 @@ fn createMonitor(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	_ = c.wlr_output_commit_state(output, &state);
 	c.wlr_output_state_finish(&state);
 
-	// TODO CONSIDER REPLACE wl_list with ArrayList
 	c.wl_list_insert(&ctx.monitors, &mon.link);
 
 	mon.fullscreen_bg = c.wlr_scene_rect_create(

@@ -78,6 +78,7 @@ const KeyboardGroup = struct {
 	fn destroy(lsr: ?*c.wl_listener, _: ?*anyopaque) void {
 		var group: *KeyboardGroup = @fieldParentPtr("destroy_lsr", lsr.?);
 		_ = c.wl_event_source_remove(group.key_repeat_source);
+		// TODO is it possible to get rid of wl_list here?
 		c.wl_list_remove(@ptrCast(&group.key_lsr.link));
 		c.wl_list_remove(@ptrCast(&group.modifiers_lsr.link));
 		c.wl_list_remove(@ptrCast(&group.destroy_lsr.link));
@@ -155,7 +156,7 @@ pub var cursor_mode: c_uint = undefined;
 pub var grab_client: *GrabClient = undefined;
 
 pub var output_layout: *c.wlr_output_layout = undefined;
-pub var screen_geom: c.wlr_box = undefined;
+pub var screen_geom = std.mem.zeroes(c.wlr_box);
 pub var monitors: c.wl_list = undefined;
 pub var sel_monitor: ?*Monitor = undefined;
 
@@ -168,13 +169,14 @@ pub fn init(proc_init: std.process.Init) !void {
 	// Reset signal handlers for SIGCHLD, SIGINT, SIGTERM and SIGPIPE
 	const sa = linux.Sigaction{
 		.flags = linux.SA.RESTART,
-		.handler = .{ .handler = handlesig },
+		.handler = .{ .handler = handleSignal },
 		.mask = linux.sigemptyset()
 	};
 
 	inline for (&.{linux.SIG.CHLD, linux.SIG.INT, linux.SIG.TERM, linux.SIG.PIPE}) |sig|
 		_ = linux.sigaction(sig, &sa, null);
 
+	// TODO CONSIDER VALUE
 	c.wlr_log_init(c.WLR_ERROR, null);
 
 	display = c.wl_display_create().?;
@@ -230,6 +232,7 @@ pub fn init(proc_init: std.process.Init) !void {
 	_ = c.wlr_export_dmabuf_manager_v1_create(display);
 	_ = c.wlr_screencopy_manager_v1_create(display);
 	_ = c.wlr_data_control_manager_v1_create(display);
+	_ = c.wlr_ext_data_control_manager_v1_create(display, 1);
 	_ = c.wlr_primary_selection_v1_device_manager_create(display);
 	_ = c.wlr_viewporter_create(display);
 	_ = c.wlr_single_pixel_buffer_manager_v1_create(display);
@@ -240,10 +243,8 @@ pub fn init(proc_init: std.process.Init) !void {
 	activation = c.wlr_xdg_activation_v1_create(display);
 	c.wl_signal_add(&activation.events.request_activate, &lsrs.items.request_activate);
 
-	c.wlr_scene_set_gamma_control_manager_v1(
-		scene,
-		c.wlr_gamma_control_manager_v1_create(display)
-	);
+	c.wlr_scene_set_gamma_control_manager_v1(scene,
+		c.wlr_gamma_control_manager_v1_create(display));
 
 	power_mgr = c.wlr_output_power_manager_v1_create(display);
 	c.wl_signal_add(&power_mgr.events.set_mode, &lsrs.items.output_power_mgr_set_mode);
@@ -263,6 +264,7 @@ pub fn init(proc_init: std.process.Init) !void {
 	c.wl_signal_add(&xdg_shell.events.new_toplevel, &lsrs.items.new_xdg_toplevel);
 	c.wl_signal_add(&xdg_shell.events.new_popup, &lsrs.items.new_xdg_popup);
 
+	// v TODO MAGIC
 	layer_shell = c.wlr_layer_shell_v1_create(display, 3);
 	c.wl_signal_add(&layer_shell.events.new_surface, &lsrs.items.new_layer_surface);
 
@@ -371,7 +373,7 @@ pub fn listenWrapper(
 	c.wl_signal_add(@ptrCast(event), @ptrCast(lsr));
 }
 
-fn handlesig(signo: linux.SIG) callconv(.c) void {
+fn handleSignal(signo: linux.SIG) callconv(.c) void {
 	var idc: i32 = undefined;
 	if (signo == linux.SIG.CHLD)
 		while (linux.waitpid(-1, &idc, linux.W.NOHANG) > 0) {}

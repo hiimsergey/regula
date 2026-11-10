@@ -5,7 +5,6 @@ const Client = @import("Client.zig");
 const Layout = @import("Layout.zig");
 const Self = @This();
 
-// TODO CONSIDER REPLACE wl_list with ArrayList or LinkedList
 link: c.wl_list,
 output: *c.wlr_output,
 scene_output: *c.wlr_scene_output,
