@@ -6,8 +6,10 @@ const config = @import("config");
 const std = @import("std");
 const linux = std.os.linux;
 const ctx = @import("globals.zig");
+const list_iterator = @import("list_iterator.zig");
+const status = @import("status.zig");
+const userconfig = @import("userconfig.zig");
 
-const Client = @import("Client.zig");
 const LayerSurface = @import("LayerSurface.zig");
 const Monitor = @import("Monitor.zig");
 const Self = @This();
@@ -41,6 +43,7 @@ destroy_decoration_lsr: c.wl_listener,
 
 bw: c_int,
 tags: u32,
+// TODO RESEARCH how does this work in zig? is this efficient?
 is: packed struct(u8) {
 	floating: bool,
 	urgent: bool,
@@ -57,47 +60,29 @@ xwayland: if (config.xwayland) struct {
 	set_hints_lsr: c.wl_listener,
 } else void = undefined,
 
-pub fn focus(self: ?*const Self, lift: bool) void {
-	if (ctx.is_locked) return;
-
-	const old_surf: *c.wlr_surface = ctx.seat.keyboard_state.focused_surface;
-
-	if (self) |cl| {
-		if (lift) c.wlr_scene_node_raise_to_top(&self.?.scene.node);
-
-		const surf_ptr: @TypeOf(old_surf) = switch (cl.surface) {
-			.xdg => @ptrCast(cl.surface.xdg),
-			.xwayland => @ptrCast(cl.surface.xwayland)
-		};
-		if (surf_ptr == old_surf) return;
-	}
-
-	var old_cl: *const Client = undefined;
-	var old_lysurf: *const LayerSurface = undefined;
-	const old_cl_kind: Kind = toplevelFromWlrSurface(old_surf, &old_cl, &old_lysurf);
-	if (old_cl_kind == .xdg_shell) {
-		// TODO wl_list_for_each_safe(popup, tmp, &old_c->surface.xdg->popups, link)
-		// var pos = c.wl_container_of(&old_cl.?.surface.xdg.popups.next, ctx.pop TODO NOW NOW)
-		// TODO NOW NOW
-	}
+pub fn focus(self: *Self, lift: bool) void {
+	focusClient(self, lift);
 }
 
-pub fn notifyEnter(surf: [*]c.wlr_surface, keyboard: ?*const c.wlr_keyboard) void {
-	if (keyboard) |kb| {
+pub fn resetFocus() void {
+	focusClient(null, false);
+}
+
+pub fn notifyEnter(surf: [*]c.wlr_surface, kb: ?*const c.wlr_keyboard) void {
+	if (kb) |k| {
 		c.wlr_seat_keyboard_notify_enter(
 			ctx.seat,
 			surf,
-			&kb.keycodes, kb.num_keycodes, &kb.modifiers);
+			&k.keycodes, k.num_keycodes, &k.modifiers);
 		return;
 	}
 
-	// TODO
 	c.wlr_seat_keyboard_notify_enter(ctx.seat, surf, null, 0, null);
 }
 
 pub fn toplevelFromWlrSurface(
 	surf: ?*c.wlr_surface,
-	cl_ptr: ?**const Self,
+	cl_ptr: ?*?*const Self,
 	lysurf_ptr: ?**const LayerSurface
 ) Kind {
 	var client_kind = Kind.invalid;
@@ -201,7 +186,7 @@ fn getAppId(self: *const Self) [*]const u8 {
 	const broken: [*]const u8 = "broken";
 	if (config.xwayland and self.surface == .xwayland)
 		return if (self.surface.xwayland.class) |cls| cls else broken;
-	return if (self.surface.xdg.unnamed_0.toplevel.*.app_id) |appid| appid else broken;
+	return if (self.surface.xdg.unnamed_0.toplevel.*.app_id) |aid| aid else broken;
 }
 
 fn getClip(self: *const Self) c.wlr_box {
@@ -231,9 +216,8 @@ fn getGeometry(self: *const Self) c.wlr_box {
 fn getParent(self: *const Self) ?*Self {
 	var result: ?*Self = null;
 	if (config.xwayland and self.surface == .xwayland) {
-		if (self.surface.xwayland.parent != null)
-			_ = toplevelFromWlrSurface(self.surface.xwayland.parent.surface,
-				&result, null);
+		if (self.surface.xwayland.parent) |par|
+			_ = toplevelFromWlrSurface(par.surface, &result, null);
 		return result;
 	}
 	if (self.surface.xdg.unnamed_0.toplevel.*.parent)
@@ -254,8 +238,8 @@ fn hasChildren(self: *const Self) bool {
 fn getTitle(self: *const Self) [*]const u8 {
 	const broken = "broken";
 	if (config.xwayland and self.surface == .xwayland)
-		return if (self.surface.xwayland.title) |title| title else broken;
-	return if (self.surface.xdg.unnamed_0.toplevel.*.title) |title| title else broken;
+		return if (self.surface.xwayland.title) |tit| tit else broken;
+	return if (self.surface.xdg.unnamed_0.toplevel.*.title) |tit| tit else broken;
 }
 
 fn isFloatType(self: *const Self) bool {
@@ -359,6 +343,45 @@ pub fn resize(self: *Self, geom: c.wlr_box, interact: bool) void {
 	c.wlr_scene_subsurface_tree_set_clip(&self.scene_surface.node, &clip);
 }
 
+pub fn setFloating(self: *Self, floating: bool) void {
+	// TODO
+	_ = self;
+	_ = floating;
+}
+
+pub fn setFullscreen(self: *Self, fullscreen: bool) void {
+	// TODO
+	_ = self;
+	_ = fullscreen;
+}
+
+// TODO CONSIDER change datatype of `new_tags`
+pub fn setMonitor(self: *Self, mon: ?*Monitor, new_tags: u32) void {
+	const old_mon: ?*const Monitor = self.mon;
+	if (old_mon == mon) return;
+
+	self.mon = mon;
+	self.prev = self.geom;
+
+	if (old_mon) |om| om.arrange();
+	if (mon) |m| {
+		self.resize(self.geom, false);
+		self.tags = if (new_tags != 0) new_tags else m.tagset[m.seltags];
+		self.setFullscreen(self.is.fullscreen);
+		self.setFloating(self.is.floating);
+	}
+	ctx.sel_mon.?.topmostClient().?.focus(true);
+}
+
+pub fn wantsFocus(self: *const Self) bool {
+	if (!config.xwayland) return false;
+
+	return self.isUnmanaged()
+		and c.wlr_xwayland_surface_override_redirect_wants_focus(self.surface.xwayland)
+		and c.wlr_xwayland_surface_icccm_input_model(self.surface.xwayland)
+			!= c.WLR_ICCCM_INPUT_MODEL_NONE;
+}
+
 fn applyBounds(self: *Self, bbox: *const c.wlr_box) void {
 	self.geom.width = @max(1 + 2 * self.bw, self.geom.width);
 	self.geom.height = @max(1 + 2 * self.bw, self.geom.height);
@@ -374,7 +397,7 @@ fn applyBounds(self: *Self, bbox: *const c.wlr_box) void {
 }
 
 fn setBorderColor(self: *const Self, color: [4]f32) void {
-	inline for (0..4) |i| c.wlr_scene_rect_set_color(self.border[i], color);
+	inline for (0..4) |i| c.wlr_scene_rect_set_color(self.border[i], &color);
 }
 
 fn setSize(self: *const Self, w: c_int, h: c_int) u32 {
@@ -390,3 +413,81 @@ fn setSize(self: *const Self, w: c_int, h: c_int) u32 {
 		h == self.surface.xdg.unnamed_0.toplevel.*.current.height) return 0;
 	return c.wlr_xdg_toplevel_set_size(self.surface.xdg.unnamed_0.toplevel, w, h);
 }
+
+fn focusClient(maybe_cl: ?*Self, lift: bool) void {
+	if (ctx.is_locked) return;
+
+	const old_surf: ?*c.wlr_surface = ctx.seat.keyboard_state.focused_surface;
+
+	if (maybe_cl) |cl| {
+		if (lift) c.wlr_scene_node_raise_to_top(&cl.scene.node);
+
+		const surf_ptr: *c.wlr_surface = switch (cl.surface) {
+			.xdg => @ptrCast(cl.surface.xdg),
+			.xwayland => @ptrCast(cl.surface.xwayland)
+		};
+		if (surf_ptr == old_surf) return;
+	}
+
+	var old_cl: ?*const Self = null;
+	var old_lysurf: *const LayerSurface = undefined;
+	const old_cl_kind: Kind = toplevelFromWlrSurface(old_surf, &old_cl, &old_lysurf);
+	if (old_cl_kind == .xdg_shell) {
+		var it = list_iterator.iterate_safe(
+			c.wlr_xdg_popup, "link", &old_cl.?.surface.xdg.popups);
+		while (it.next()) |popup|
+			c.wlr_xdg_popup_destroy(popup);
+
+		// TODO NOW
+	}
+
+	blk: {
+		const cl: *Self = maybe_cl orelse break :blk;
+		if (cl.isUnmanaged()) break :blk;
+
+		c.wl_list_remove(&cl.flink);
+		c.wl_list_insert(&ctx.focus_stack, &cl.flink);
+		ctx.sel_mon = cl.mon;
+		cl.is.urgent = false;
+
+		if (ctx.exclusive_focus == null and ctx.seat.drag == null)
+			cl.setBorderColor(userconfig.focus_color);
+	}
+
+	blk: {
+		const old_surf_unwrapped = old_surf orelse break :blk;
+		if (maybe_cl) |cl| {
+			const cl_surf: *c.wlr_surface = switch(cl.surface) {
+				.xdg => @ptrCast(cl.surface.xdg),
+				.xwayland => @ptrCast(cl.surface.xwayland)
+			};
+			if (cl_surf == old_surf_unwrapped) break :blk;
+		}
+
+		const coords: ?usize = null; // TODO PLACEHOLDER REMOVE
+
+		if (old_cl_kind == .layer_shell
+			and coords != null
+			and &old_lysurf.layer_surface.current.layer >= c.ZWLR_LAYER_SHELL_V1_LAYER_TOP
+		) {
+			return;
+		}
+		else if (old_cl != null
+			and old_cl.? == @as(*const Self, @alignCast(@ptrCast(ctx.exclusive_focus)))
+			and old_cl.?.wantsFocus()
+		) {
+			return;
+		}
+		// TODO STYLE
+		else blk2: {
+			const old_cl_unwrapped = old_cl orelse break :blk2;
+			if (old_cl_unwrapped.isUnmanaged()) break :blk2;
+			if (maybe_cl) |cl| if (cl.wantsFocus()) break :blk2;
+
+			old_cl_unwrapped.setBorderColor(userconfig.border_color);
+			Self.activateSurface(old_surf, false);
+		}
+	}
+	status.print();
+}
+

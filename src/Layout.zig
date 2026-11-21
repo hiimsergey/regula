@@ -1,5 +1,7 @@
 const c = @import("c");
 const ctx = @import("globals.zig");
+const list_iterator = @import("list_iterator.zig");
+
 const Client = @import("Client.zig");
 const Monitor = @import("Monitor.zig");
 const Self = @This();
@@ -9,27 +11,23 @@ arrangeFn: ?*const fn (*Monitor) void,
 
 pub const arrange = struct {
 	fn monocle(mon: *const Monitor) void {
-		// TODO ALL CONSIDER REPLACEWITH iterator
-		var cl: *Client = @fieldParentPtr("link", &ctx.clients.next.*);
-		while (&cl.link != &ctx.clients) :
-			(cl = @fieldParentPtr("link", &cl.link.next.*))
-		{
+		var it = list_iterator.iterate(Client, "link", &ctx.clients);
+		while (it.next()) |cl| {
 			if (!cl.visibleOn(mon) or cl.is.floating or cl.is.fullscreen) continue;
 			cl.resize(mon.window, false);
 		}
 
-		cl = mon.topmostClient() orelse return;
-		c.wlr_scene_node_raise_to_top(&cl.scene.node);
+		const topmost_cl: *Client = mon.topmostClient() orelse return;
+		c.wlr_scene_node_raise_to_top(&topmost_cl.scene.node);
 	}
 
 	fn tile(mon: *const Monitor) void {
-		var cl: *Client = @fieldParentPtr("link", &ctx.clients.next.*);
-		var n: usize = 0;
+		var it = list_iterator.iterate(Client, "link", &ctx.clients);
 
-		while (&cl.link != &ctx.clients) :
-			(cl = @fieldParentPtr("link", &cl.link.next.*))
-		{
-			if (cl.visibleOn(mon) and !cl.is.floating and !cl.is.fullscreen) n += 1;
+		var n: usize = 0;
+		while (it.next()) |cl| {
+			if (cl.visibleOn(mon) and !cl.is.floating and !cl.is.fullscreen)
+				n += 1;
 		}
 		if (n == 0) return;
 
@@ -42,11 +40,9 @@ pub const arrange = struct {
 		var i: c_int = 0;
 		var my: c_int = 0;
 		var ty: c_int = 0;
-		cl = @fieldParentPtr("link", &ctx.clients.next.*);
-		while (&cl.link != &ctx.clients) : ({
-			cl = @fieldParentPtr("link", &cl.link.next.*);
-			i += 1;
-		}) {
+
+		it.reset();
+		while (it.next()) |cl| : (i += 1) {
 			if (!cl.visibleOn(mon) or cl.is.floating or cl.is.fullscreen) continue;
 			if (i < mon.master_n) {
 				cl.resize(.{

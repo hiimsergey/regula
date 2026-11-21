@@ -1,6 +1,7 @@
 const c = @import("c");
 const std = @import("std");
 const log = std.log;
+const mem = std.mem;
 const ctx = @import("globals.zig");
 
 pub const help_text =
@@ -40,15 +41,15 @@ fn handleArgs(args: std.process.Args) ?u8 {
 	_ = it.skip(); // Skip executable name
 	const flag = it.next() orelse return null;
 
-	if (std.mem.eql(u8, flag, "--startup") or std.mem.eql(u8, flag, "-s")) {
+	if (mem.eql(u8, flag, "--startup") or mem.eql(u8, flag, "-s")) {
 		// TODO
 		return 0;
 	}
-	else if (std.mem.eql(u8, flag, "--help") or std.mem.eql(u8, flag, "-h")) {
+	else if (mem.eql(u8, flag, "--help") or mem.eql(u8, flag, "-h")) {
 		log.info(help_text, .{});
 		return 0;
 	}
-	else if (std.mem.eql(u8, flag, "--version") or std.mem.eql(u8, flag, "-v")) {
+	else if (mem.eql(u8, flag, "--version") or mem.eql(u8, flag, "-v")) {
 		log.info(version, .{});
 		return 0;
 	}

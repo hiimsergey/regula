@@ -3,6 +3,7 @@ const config = @import("config");
 const std = @import("std");
 const linux = std.os.linux;
 const ctx = @import("globals.zig");
+const list_iterator = @import("list_iterator.zig");
 const userconfig = @import("userconfig.zig");
 
 const FieldAttributes = std.builtin.Type.Struct.FieldAttributes;
@@ -80,9 +81,31 @@ pub fn deinit() void {
 	}
 }
 
-fn cleanupMonitor(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
-	// TODO
-	_ = data;
+fn cleanupMonitor(lsr: [*c]c.wl_listener, _: ?*anyopaque) callconv(.c) void {
+	// TODO NOW NOW
+
+	var mon: *Monitor = @fieldParentPtr("destroy", @as(*c.wl_listener, @ptrCast(lsr)));
+
+	for (0..mon.layers.len) |i| {
+		var it = list_iterator.iterate_safe(LayerSurface, "link", &mon.layers[i]);
+		while (it.next()) |lysurf|
+			c.wlr_layer_surface_v1_destroy(lysurf.layer_surface);
+	}
+
+	c.wl_list_remove(&mon.destroy.link);
+	c.wl_list_remove(&mon.frame.link);
+	c.wl_list_remove(&mon.link);
+	c.wl_list_remove(&mon.request_state.link);
+
+	if (mon.lock_surface) |_|
+		destroyLockSurface(&mon.destroy_lock_surface, null);
+	mon.output.data = null;
+	c.wlr_output_layout_remove(ctx.output_layout, mon.output);
+	c.wlr_scene_output_destroy(mon.scene_output);
+
+	mon.close();
+	c.wlr_scene_node_destroy(&mon.fullscreen_bg.node);
+	ctx.gpa.destroy(mon);
 }
 
 fn commitLayerSurfaceNotify(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
@@ -96,6 +119,11 @@ fn commitNotify(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 }
 
 fn destroyLayerSurfaceNotify(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
+	// TODO
+	_ = data;
+}
+
+fn destroyLockSurface(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	// TODO
 	_ = data;
 }
@@ -200,10 +228,11 @@ fn gpuReset(_: [*c]c.wl_listener, _: ?*anyopaque) callconv(.c) void {
 
 	c.wlr_compositor_set_renderer(ctx.compositor, ctx.renderer);
 
-	// TODO NOW
-	var mon: *Monitor = @fieldParentPtr("link", &ctx.monitors.next.*);
-	while (&mon.link != &ctx.monitors) : (mon = @fieldParentPtr("link", &mon.link.next.*))
+	var it = list_iterator.iterate(Monitor, "link", &ctx.monitors);
+	while (it.next()) |mon|
 		_ = c.wlr_output_init_render(mon.output, ctx.alloc, ctx.renderer);
+
+	// TODO NOW
 }
 
 fn updateMonitors(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
@@ -230,8 +259,8 @@ fn updateMonitors(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 
 	// TODO wl_list_for_each
 
-	if (ctx.sel_monitor != null and ctx.sel_monitor.?.output.enabled) {
-		const selmon: *const Monitor = ctx.sel_monitor.?;
+	if (ctx.sel_mon != null and ctx.sel_mon.?.output.enabled) {
+		const selmon: *const Monitor = ctx.sel_mon.?;
 		// TODO wl_list_for_each
 		selmon.topmostClient().?.focus(true);
 
@@ -269,7 +298,7 @@ fn createLayerSurface(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void
 		@ptrCast(ctx.layers[ctx.Layer.map[layer_surface.pending.layer]]);
 
 	if (layer_surface.output == null) {
-		layer_surface.output = if (ctx.sel_monitor) |sm| sm.output else null;
+		layer_surface.output = if (ctx.sel_mon) |smon| smon.output else null;
 		if (layer_surface.output == null) {
 			c.wlr_layer_surface_v1_destroy(layer_surface);
 			return;
@@ -433,8 +462,8 @@ fn outputMgrTest(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 
 fn powerMgrSetMode(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 	const event: *c.wlr_output_power_v1_set_mode_event = @alignCast(@ptrCast(data));
-	const mon: *Monitor = if (event.output.*.data) |ptr| @alignCast(@ptrCast(ptr)) else
-		return;
+	const mon: *Monitor = if (event.output.*.data) |ptr| @alignCast(@ptrCast(ptr))
+		else return;
 	mon.gamma_lut_changed = 1;
 
 	var state = c.wlr_output_state{};
@@ -450,7 +479,7 @@ fn urgent(_: [*c]c.wl_listener, data: ?*anyopaque) callconv(.c) void {
 		@alignCast(@ptrCast(data));
 	const client: ?*const Client = null;
 	_ = Client.toplevelFromWlrSurface(event.surface, @constCast(@ptrCast(&client)), null);
-	if (client == null or c == ctx.sel_monitor.?.topmostClient()) return;
+	if (client == null or c == ctx.sel_mon.?.topmostClient()) return;
 
 	client.is_urgent = true;
 

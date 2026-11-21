@@ -112,7 +112,7 @@ pub var io: Io = undefined;
 
 pub var child_pid: linux.pid_t = -1;
 pub var is_locked: bool = undefined;
-pub var exclusive_focus: *anyopaque = undefined;
+pub var exclusive_focus: ?*anyopaque = undefined;
 pub var display: *c.wl_display = undefined;
 pub var event_loop: *c.wl_event_loop = undefined;
 pub var backend: *c.wlr_backend = undefined;
@@ -158,7 +158,7 @@ pub var grab_client: *GrabClient = undefined;
 pub var output_layout: *c.wlr_output_layout = undefined;
 pub var screen_geom = std.mem.zeroes(c.wlr_box);
 pub var monitors: c.wl_list = undefined;
-pub var sel_monitor: ?*Monitor = undefined;
+pub var sel_mon: ?*Monitor = undefined;
 
 pub var xwayland: if (config.xwayland) [*c]c.wlr_xwayland else void = undefined;
 
@@ -276,7 +276,7 @@ pub fn init(proc_init: std.process.Init) !void {
 	session_lock_mgr = c.wlr_session_lock_manager_v1_create(display);
 	c.wl_signal_add(&session_lock_mgr.events.new_lock, &lsrs.items.new_session_lock);
 
-	// TODO NOW NOW DEBUG geometry assertion fails here
+	// TODO DEBUG geometry assertion fails here
 	locked_bg = c.wlr_scene_rect_create(
 		layers[@backingInt(Layer.block)],
 		screen_geom.width, screen_geom.height,

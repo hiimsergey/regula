@@ -1,5 +1,7 @@
 const c = @import("c");
 const ctx = @import("globals.zig");
+const list_iterator = @import("list_iterator.zig");
+const status = @import("status.zig");
 
 const Client = @import("Client.zig");
 const Layout = @import("Layout.zig");
@@ -51,18 +53,52 @@ pub const rules = [_]Rule{
 	}
 };
 
+pub fn close(self: *Self) void {
+	const mon_n: usize = @intCast(c.wl_list_length(&ctx.monitors));
+	if (mon_n == 0) {
+		ctx.sel_mon = null;
+	} else if (self == ctx.sel_mon) {
+		const mons_next: *c.wl_list = @ptrCast(ctx.monitors.next);
+		for (0..mon_n) |_| {
+			ctx.sel_mon = @fieldParentPtr("link", mons_next);
+			if (ctx.sel_mon.?.output.enabled) break;
+		}
+
+		if (!ctx.sel_mon.?.output.enabled) ctx.sel_mon = null;
+	}
+
+	var it = list_iterator.iterate(Client, "link", &ctx.clients);
+	while (it.next()) |cl| {
+		if (cl.is.floating and cl.geom.x > self.monitor.width) {
+			const geom = c.wlr_box{
+				.x = cl.geom.x - self.window.width,
+				.y = cl.geom.y,
+				.width = cl.geom.width,
+				.height = cl.geom.height
+			};
+			cl.resize(geom, false);
+		}
+		if (cl.mon == self) cl.setMonitor(ctx.sel_mon, cl.tags);
+	}
+
+	ctx.sel_mon.?.topmostClient().?.focus(true);
+	status.print();
+}
+
+pub fn arrange(self: Self) void {
+	_ = self;
+	// TODO
+}
+
 pub fn fromXY(x: f64, y: f64) ?*Self {
 	const output: *c.wlr_output = c.wlr_output_layout_output_at(ctx.output_layout, x, y) orelse return null;
 	return output.data;
 }
 
 pub fn topmostClient(self: *const Self) ?*Client {
-	var cl: *Client = @fieldParentPtr("flink", &ctx.focus_stack.next.*);
-	while (&cl.flink != &ctx.focus_stack) :
-		(cl = @fieldParentPtr("flink", &cl.flink.next.*))
-		// TODO verify ^
-	{
+	var fstack_it = list_iterator.iterate(Client, "flink", &ctx.focus_stack);
+	while (fstack_it.next()) |cl|
 		if (cl.visibleOn(self)) return cl;
-	}
+
 	return null;
 }
